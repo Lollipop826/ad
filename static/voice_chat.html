@@ -1,0 +1,2232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>记忆守护 · 认知评估助手</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+        rel="stylesheet">
+    <!-- Chart.js & PDF Export -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root {
+            /* 🧠 AD 认知评估主题 — 沉稳医疗蓝 + 温暖关怀橙 */
+            --primary-color: #4A90A4;      /* 医疗蓝绿 — 专业可信 */
+            --primary-dark: #2C6E7F;       /* 深蓝绿 */
+            --accent-color: #E8925B;       /* 暖橙 — 关怀温暖 */
+            --bg-color: #F5F7FA;           /* 淡灰蓝 — 护眼舒适 */
+
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --text-primary: #2D3748;       /* 深灰 */
+            --text-secondary: #718096;
+            --font-main: 'Noto Sans SC', 'Nunito', sans-serif;
+
+            /* 状态色 */
+            --status-listening: #D69E2E;   /* 金色 — 聆听 */
+            --status-thinking: #805AD5;    /* 紫色 — 思考/大脑 */
+            --status-speaking: #38A169;    /* 绿色 — 说话 */
+
+            /* Orb 渐变 — 脑神经主题 */
+            --orb-idle: radial-gradient(circle at 30% 30%, #E2E8F0, #CBD5E0);
+            --orb-speaking: radial-gradient(circle at 30% 30%, #C6F6D5, #38A169);
+            --orb-thinking: radial-gradient(circle at 30% 30%, #E9D8FD, #805AD5);
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-main);
+            background: var(--bg-color);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 环境背景 — 柔和脑神经纹理 */
+        .ambient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(ellipse at 20% 50%, rgba(128, 90, 213, 0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(74, 144, 164, 0.06) 0%, transparent 50%),
+                radial-gradient(circle at 50% 100%, rgba(232, 146, 91, 0.04) 0%, transparent 40%),
+                linear-gradient(180deg, #F0F4F8 0%, #F5F7FA 100%);
+            z-index: -1;
+        }
+
+        /* App Container */
+        #app-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            padding: 0 1rem;
+        }
+
+        /* --- Header --- */
+        header {
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .brand {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--primary-dark);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            letter-spacing: 0.02em;
+        }
+
+        .drawer-toggle {
+            background: none;
+            border: none;
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.5rem;
+            transition: color 0.2s;
+        }
+
+        .drawer-toggle:hover {
+            color: var(--primary-color);
+        }
+
+        /* --- Hero Section (Orb) --- */
+        #hero-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            min-height: 300px;
+        }
+
+        /* 🧠 Brain Orb — 更大更醒目 */
+        .orb-container {
+            width: 240px;
+            height: 240px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .orb {
+            width: 200px;
+            height: 200px;
+            border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%;
+            background: var(--orb-idle);
+            box-shadow:
+                inset 10px 10px 30px rgba(255, 255, 255, 0.4),
+                0 0 40px rgba(74, 144, 164, 0.15);
+            animation: morph 6s linear infinite;
+            transition: all 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+            position: absolute;
+        }
+
+        /* 🧠 Orb 脑电波环 */
+        .orb::before {
+            content: '';
+            position: absolute;
+            inset: -15px;
+            border-radius: 50%;
+            border: 2px dashed rgba(128, 90, 213, 0.15);
+            animation: orb-ring-spin 12s linear infinite;
+        }
+
+        @keyframes orb-ring-spin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+
+        .orb.speaking {
+            background: var(--orb-speaking);
+            filter: drop-shadow(0 0 25px rgba(56, 161, 105, 0.4));
+            animation: morph 3s linear infinite, pulse 1s ease-in-out infinite alternate;
+        }
+
+        .orb.speaking::before {
+            border-color: rgba(56, 161, 105, 0.3);
+            animation: orb-ring-spin 4s linear infinite;
+        }
+
+        .orb.thinking {
+            background: var(--orb-thinking);
+            animation: spin 4s linear infinite;
+            border-radius: 45%;
+            width: 220px;
+            height: 220px;
+            filter: drop-shadow(0 0 30px rgba(128, 90, 213, 0.35));
+        }
+
+        .orb.thinking::before {
+            border-color: rgba(128, 90, 213, 0.4);
+            border-width: 3px;
+            animation: orb-ring-spin 3s linear infinite reverse;
+            inset: -20px;
+        }
+
+        .orb.listening {
+            transform: scale(1.08);
+            filter: drop-shadow(0 0 25px rgba(214, 158, 46, 0.3));
+        }
+
+        .orb.listening::before {
+            border-color: rgba(214, 158, 46, 0.3);
+        }
+
+        @keyframes morph {
+
+            0%,
+            100% {
+                border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%;
+                transform: translate3d(0, 0, 0) rotateZ(0.01deg);
+            }
+
+            34% {
+                border-radius: 70% 30% 46% 54% / 30% 29% 71% 70%;
+                transform: translate3d(0, 5px, 0) rotateZ(0.01deg);
+            }
+
+            67% {
+                border-radius: 100% 60% 60% 100% / 100% 100% 60% 60%;
+                transform: translate3d(0, -3px, 0) rotateZ(0.01deg);
+            }
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            100% {
+                transform: scale(1.08);
+            }
+        }
+
+        /* 状态徽章 — 加大 */
+        .status-badge {
+            margin-top: 1.5rem;
+            padding: 0.7rem 1.8rem;
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(12px);
+            border-radius: 30px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+            transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        /* --- Conversation Stream --- */
+        #conversation-stream {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem 2rem;
+            scroll-behavior: smooth;
+            /* Mask to fade out top */
+            mask-image: linear-gradient(to bottom, transparent 0%, black 10%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 10%);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message-row {
+            display: flex;
+            margin-bottom: 0.5rem;
+            animation: messageSlideIn 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+            animation-fill-mode: both;
+        }
+
+        .message-row.user {
+            justify-content: flex-end;
+        }
+
+        .message-row.ai {
+            justify-content: flex-start;
+        }
+
+        .bubble {
+            max-width: 75%;
+            padding: 1.1rem 1.6rem;
+            font-size: 1.05rem;
+            line-height: 1.75;
+            border-radius: 24px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        /* AI Bubble - Glassmorphism */
+        .ai .bubble {
+            background: rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            color: var(--text-primary);
+            border-bottom-left-radius: 6px;
+            box-shadow:
+                0 4px 30px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        }
+
+        .ai .bubble:hover {
+            background: rgba(255, 255, 255, 0.8);
+            transform: translateY(-2px);
+            box-shadow:
+                0 8px 40px rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.6);
+        }
+
+        /* 用户消息气泡 — 医疗蓝绿 */
+        .user .bubble {
+            background: linear-gradient(135deg,
+                    rgba(74, 144, 164, 0.88),
+                    rgba(44, 110, 127, 0.92));
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(74, 144, 164, 0.3);
+            color: white;
+            border-bottom-right-radius: 6px;
+            box-shadow:
+                0 4px 25px rgba(74, 144, 164, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+
+        .user .bubble:hover {
+            transform: translateY(-2px);
+            box-shadow:
+                0 8px 35px rgba(74, 144, 164, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+
+        /* Typing indicator for AI */
+        .bubble.typing::after {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 4px;
+            background: var(--primary-color);
+            border-radius: 50%;
+            margin-left: 8px;
+            animation: typingDot 1.4s infinite ease-in-out both;
+        }
+
+        @keyframes typingDot {
+
+            0%,
+            80%,
+            100% {
+                transform: scale(0);
+                opacity: 0.5;
+            }
+
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* Emotion Label - Modern Pill */
+        .emotion-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-left: 10px;
+            vertical-align: middle;
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* ===== 🧠 思考指示器 — 大号醒目 ===== */
+        .thinking-bubble {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 1.4rem 2rem;
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(128, 90, 213, 0.15);
+            border-radius: 24px;
+            max-width: 90%;
+            width: 100%;
+            animation: thinkingSlideIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            box-shadow: 0 8px 32px rgba(128, 90, 213, 0.12);
+        }
+
+        @keyframes thinkingSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.92);
+                filter: blur(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0);
+            }
+        }
+
+        .thinking-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #805AD5, #B794F4);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .thinking-icon::after {
+            content: '';
+            position: absolute;
+            inset: -5px;
+            border-radius: 50%;
+            border: 3px solid transparent;
+            border-top-color: #805AD5;
+            border-right-color: rgba(128, 90, 213, 0.3);
+            animation: thinkingSpin 1s linear infinite;
+        }
+
+        .thinking-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .thinking-title {
+            font-weight: 700;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .thinking-dots {
+            display: inline-flex;
+            gap: 5px;
+        }
+
+        .thinking-dots span {
+            width: 8px;
+            height: 8px;
+            background: #805AD5;
+            border-radius: 50%;
+            animation: dotBounce 1.4s ease-in-out infinite;
+        }
+
+        .thinking-dots span:nth-child(1) { animation-delay: 0s; }
+        .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        .thinking-status {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            transition: opacity 0.3s ease;
+            line-height: 1.5;
+        }
+
+        /* 进度条 — 加粗 */
+        .thinking-progress {
+            height: 4px;
+            background: #EDE9FE;
+            border-radius: 4px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+
+        .thinking-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #805AD5, #B794F4, #805AD5);
+            background-size: 200% 100%;
+            border-radius: 4px;
+            animation: progressShimmer 2s ease-in-out infinite;
+        }
+
+        @keyframes progressShimmer {
+            0%   { width: 15%; margin-left: 0; background-position: 0% 0; }
+            50%  { width: 50%; margin-left: 25%; background-position: 100% 0; }
+            100% { width: 15%; margin-left: 85%; background-position: 0% 0; }
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; transform: translateY(0); }
+            to   { opacity: 0; transform: translateY(-10px); }
+        }
+
+        @keyframes thinkingSpin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+
+        @keyframes dotBounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+            40%           { transform: translateY(-8px); opacity: 1; }
+        }
+
+        /* ===== 开场白加载动画 — 大号脑电波 ===== */
+        .session-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            padding: 2rem 2.5rem;
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(128, 90, 213, 0.12);
+            border-radius: 24px;
+            max-width: 90%;
+            width: 100%;
+            animation: thinkingSlideIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+            box-shadow: 0 8px 32px rgba(128, 90, 213, 0.1);
+        }
+
+        .session-loading .loading-wave {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .session-loading .loading-wave span {
+            display: block;
+            width: 6px;
+            height: 24px;
+            background: linear-gradient(180deg, #805AD5, #B794F4);
+            border-radius: 3px;
+            animation: wave 1.2s ease-in-out infinite;
+        }
+
+        .session-loading .loading-wave span:nth-child(1) { animation-delay: 0s; height: 20px; }
+        .session-loading .loading-wave span:nth-child(2) { animation-delay: 0.1s; height: 30px; }
+        .session-loading .loading-wave span:nth-child(3) { animation-delay: 0.2s; height: 40px; }
+        .session-loading .loading-wave span:nth-child(4) { animation-delay: 0.3s; height: 30px; }
+        .session-loading .loading-wave span:nth-child(5) { animation-delay: 0.4s; height: 20px; }
+        .session-loading .loading-wave span:nth-child(6) { animation-delay: 0.5s; height: 30px; }
+        .session-loading .loading-wave span:nth-child(7) { animation-delay: 0.6s; height: 40px; }
+
+        @keyframes wave {
+            0%, 100% { transform: scaleY(0.4); opacity: 0.35; }
+            50%      { transform: scaleY(1.3); opacity: 1; }
+        }
+
+        .session-loading .loading-text {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .session-loading .loading-sub {
+            font-size: 0.85rem;
+            color: #A0AEC0;
+        }
+
+        /* Message entrance animation */
+        @keyframes messageSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.95);
+                filter: blur(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0);
+            }
+        }
+
+        /* Stagger animation for multiple messages */
+        .message-row:nth-last-child(1) {
+            animation-delay: 0s;
+        }
+
+        .message-row:nth-last-child(2) {
+            animation-delay: 0.05s;
+        }
+
+        .message-row:nth-last-child(3) {
+            animation-delay: 0.1s;
+        }
+
+        /* --- Control Bar --- */
+        #control-bar {
+            padding: 1.5rem;
+            background: transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            z-index: 20;
+        }
+
+        .ctrl-btn {
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-mic {
+            width: 72px;
+            height: 72px;
+            background: var(--primary-color);
+            color: white;
+            font-size: 1.8rem;
+            box-shadow: 0 8px 25px rgba(74, 144, 164, 0.3);
+        }
+
+        .btn-mic:hover {
+            transform: scale(1.05);
+        }
+
+        .btn-mic:active {
+            transform: scale(0.95);
+        }
+
+        .btn-mic.recording {
+            background: #F56565;
+            box-shadow: 0 8px 25px rgba(245, 101, 101, 0.4);
+            animation: pulse-red 2s infinite;
+        }
+
+        .btn-interrupt {
+            background: #F56565;
+            color: white;
+            width: 48px;
+            height: 48px;
+            font-size: 1.2rem;
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes pulse-red {
+            0% {
+                box-shadow: 0 0 0 0 rgba(245, 101, 101, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 15px rgba(245, 101, 101, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(245, 101, 101, 0);
+            }
+        }
+
+        @keyframes popIn {
+            0% {
+                opacity: 0;
+                transform: scale(0.5);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .btn-secondary {
+            width: 48px;
+            height: 48px;
+            background: #EDF2F7;
+            color: var(--text-secondary);
+            font-size: 1.2rem;
+        }
+
+        .btn-secondary:hover {
+            background: #E2E8F0;
+            color: var(--text-primary);
+        }
+
+        /* --- Drawer (Sidebar) --- */
+        #drawer-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.3);
+            z-index: 90;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        #drawer-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #drawer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: 320px;
+            background: white;
+            z-index: 100;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 2rem;
+            box-shadow: -10px 0 40px rgba(0, 0, 0, 0.05);
+            overflow-y: auto;
+        }
+
+        #drawer.open {
+            transform: translateX(0);
+        }
+
+        .drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .drawer-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        /* Form Styles in Drawer */
+        .input-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        .input {
+            width: 100%;
+            padding: 0.8rem;
+            border-radius: 12px;
+            border: 1px solid #E2E8F0;
+            font-size: 1rem;
+            font-family: inherit;
+            transition: border 0.2s;
+        }
+
+        .input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        /* Stats Cards in Drawer */
+        .stats-card {
+            background: #F7FAFC;
+            border-radius: 16px;
+            padding: 1.2rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .score-display {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            line-height: 1;
+        }
+
+        /* Speaker Enroll in Drawer */
+        .speaker-card {
+            background: #F0FFF4;
+            border: 1px solid #C6F6D5;
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Image Display Modal */
+        #image-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 200;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(5px);
+            animation: fadeIn 0.3s;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 20px;
+            max-width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="ambient-bg"></div>
+
+    <div id="app-container">
+        <!-- Header -->
+        <header>
+            <div class="brand">
+                <i class="fas fa-brain" style="color: var(--primary-color)"></i>
+                <span>记忆守护 · AD认知评估</span>
+            </div>
+            <button class="drawer-toggle" onclick="toggleDrawer()">
+                <i class="fas fa-bars"></i>
+            </button>
+        </header>
+
+        <!-- Hero Visualization -->
+        <div id="hero-section">
+            <div class="orb-container">
+                <div id="visual-orb" class="orb"></div>
+            </div>
+
+            <div id="status-display" class="status-badge" style="opacity: 0;">
+                <span id="status-icon">🤔</span>
+                <span id="status-text">就绪</span>
+            </div>
+        </div>
+
+        <!-- Conversation Stream -->
+        <div id="conversation-stream">
+            <div class="message-row ai">
+                <div class="bubble">
+                    <i class="fas fa-brain" style="margin-right: 8px; color: var(--primary-color);"></i>
+                    您好！我是您的认知评估助手。请在左侧填写基本信息后，点击"开始新会话"即可进行阿尔茨海默病认知筛查。
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div id="control-bar">
+            <!-- Interupt Button (Hidden unless speaking) -->
+            <button id="interrupt-btn" class="ctrl-btn btn-interrupt" onclick="interruptAI()" style="display: none;"
+                title="打断AI">
+                <i class="fas fa-stop"></i>
+            </button>
+
+            <button class="ctrl-btn btn-secondary" onclick="switchInputMode()" title="切换输入模式">
+                <i class="fas fa-keyboard"></i>
+            </button>
+
+            <button id="mic-btn" class="ctrl-btn btn-mic" onclick="toggleRecording()">
+                <i class="fas fa-microphone"></i>
+            </button>
+
+            <button id="end-btn" class="ctrl-btn btn-secondary" onclick="endSession()" disabled title="结束对话"
+                style="color: #F56565;">
+                <i class="fas fa-power-off"></i>
+            </button>
+        </div>
+
+        <!-- Text Input Overlay (Hidden by default) -->
+        <div id="text-input-bar"
+            style="display: none; padding: 1rem; background: white; position: absolute; bottom: 0; width: 100%; box-shadow: 0 -5px 20px rgba(0,0,0,0.1); z-index: 25;">
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="text-input" class="input" placeholder="输入消息..."
+                    onkeypress="if(event.key==='Enter') sendTextMessage()">
+                <button class="ctrl-btn btn-secondary" onclick="sendTextMessage()"
+                    style="background: var(--primary-color); color: white;">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+                <button class="ctrl-btn btn-secondary" onclick="switchInputMode()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Drawer (Settings & MMSE) -->
+    <div id="drawer-overlay" onclick="toggleDrawer()"></div>
+    <div id="drawer">
+        <div class="drawer-header">
+            <span class="drawer-title">认知筛查设置</span>
+            <button class="close-btn" onclick="toggleDrawer()">&times;</button>
+        </div>
+
+        <!-- Patient Info -->
+        <div class="input-group">
+            <label class="label">姓名</label>
+            <input type="text" id="patient-name" class="input" placeholder="请输入姓名">
+        </div>
+
+        <div class="input-group" style="display: flex; gap: 1rem;">
+            <div style="flex: 1;">
+                <label class="label">年龄</label>
+                <input type="number" id="patient-age" class="input" value="70">
+            </div>
+            <div style="flex: 1;">
+                <label class="label">性别</label>
+                <select id="patient-sex" class="input" style="height: 48px;">
+                    <option value="女">女</option>
+                    <option value="男">男</option>
+                </select>
+            </div>
+        </div>
+
+        <button onclick="startSession()" id="start-btn"
+            style="width: 100%; padding: 1rem; background: linear-gradient(135deg, var(--primary-color), var(--primary-dark)); color: white; border: none; border-radius: 12px; font-weight: 700; font-size: 1rem; cursor: pointer; margin-bottom: 2rem; box-shadow: 0 4px 15px rgba(74,144,164,0.3);">
+            🧠 开始认知筛查
+        </button>
+
+        <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 2rem;">
+
+        <!-- Speaker Verification (Restored) -->
+        <div class="speaker-card">
+            <div class="label" style="display: flex; justify-content: space-between; align-items: center;">
+                声纹验证
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="speaker-verify-toggle" onchange="toggleSpeakerVerify(this.checked)">
+                    <span id="verify-status-text" style="font-size: 0.75rem; color: #718096;">关闭</span>
+                </label>
+            </div>
+
+            <!-- Saved Speakers Dropdown -->
+            <div style="margin-bottom: 0.8rem;">
+                <div style="font-size: 0.8rem; color: #666; margin-bottom: 0.3rem;">已保存的声纹：</div>
+                <select id="saved-speakers" onchange="loadSelectedSpeaker()"
+                    style="width: 100%; padding: 0.5rem; border: 1px solid #E2E8F0; border-radius: 8px; font-size: 0.9rem;">
+                    <option value="">请选择或新建</option>
+                </select>
+            </div>
+
+            <!-- Name Input -->
+            <div class="input-group">
+                <input type="text" id="speaker-name-input" class="input" placeholder="说话人姓名">
+            </div>
+
+            <!-- Enroll Button -->
+            <button id="enroll-btn" onclick="toggleEnrollRecording()"
+                style="width: 100%; padding: 0.6rem; background: var(--primary-dark); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; margin-bottom: 0.5rem;">
+                🎙️ 开始录制
+            </button>
+
+            <!-- Sample Progress Dots -->
+            <div style="display: flex; gap: 0.3rem; margin-bottom: 0.5rem; flex-wrap: wrap; justify-content: center;">
+                <div id="sample-1" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    1</div>
+                <div id="sample-2" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    2</div>
+                <div id="sample-3" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    3</div>
+                <div id="sample-4" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    4</div>
+                <div id="sample-5" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    5</div>
+                <div id="sample-6" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    6</div>
+                <div id="sample-7" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    7</div>
+                <div id="sample-8" class="sample-dot"
+                    style="width: 20px; height: 20px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem;">
+                    8</div>
+            </div>
+
+            <div id="enroll-status"
+                style="font-size: 0.8rem; color: #718096; text-align: center; margin-bottom: 0.5rem;"></div>
+
+            <!-- Save Button -->
+            <button id="save-speaker-btn" onclick="saveSpeaker()" disabled
+                style="width: 100%; padding: 0.5rem; background: #EDF2F7; border: none; border-radius: 8px; cursor: pointer; margin-bottom: 0.8rem;">
+                💾 保存声纹
+            </button>
+
+            <!-- Threshold Slider -->
+            <div style="font-size: 0.8rem; color: #718096; text-align: center;">验证阈值: <span
+                    id="threshold-val">0.70</span></div>
+            <input type="range" id="threshold-slider" min="0.3" max="0.9" step="0.05" value="0.70" style="width: 100%;"
+                onchange="updateThreshold(this.value)">
+        </div>
+
+        <hr style="border: 0; border-top: 1px solid #E2E8F0; margin-bottom: 2rem;">
+
+        <!-- MMSE Score Panel -->
+        <div class="label">当前评估得分</div>
+        <div class="stats-card">
+            <div class="score-display" id="mmse-total-score">0/30</div>
+            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem;" id="mmse-status">未开始</div>
+        </div>
+
+        <div id="mmse-dimensions" style="font-size: 0.85rem; margin-bottom: 1rem;">
+            <!-- Dynamic Dimensions -->
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <canvas id="mmse-radar-chart"></canvas>
+        </div>
+
+        <button onclick="exportReport()" id="export-btn" class="ctrl-btn btn-secondary"
+            style="width: 100%; border-radius: 12px; gap: 0.5rem; font-size: 0.95rem;">
+            <i class="fas fa-file-pdf"></i> 导出评估报告
+        </button>
+    </div>
+
+    <!-- Image Modal -->
+    <div id="image-modal">
+        <div class="modal-content">
+            <h3 id="image-title" style="margin-top: 0;">题目图片</h3>
+            <img id="display-image" src="" style="max-width: 100%; max-height: 50vh; border-radius: 10px;">
+            <br>
+            <button onclick="hideImage()"
+                style="margin-top: 1rem; padding: 0.8rem 2rem; background: #E2E8F0; border: none; border-radius: 30px; cursor: pointer;">
+                关闭
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- UI Logic ---
+        function toggleDrawer() {
+            document.getElementById('drawer').classList.toggle('open');
+            document.getElementById('drawer-overlay').classList.toggle('open');
+        }
+
+        function switchInputMode() {
+            const textBar = document.getElementById('text-input-bar');
+            if (textBar.style.display === 'none') {
+                textBar.style.display = 'block';
+                document.getElementById('text-input').focus();
+            } else {
+                textBar.style.display = 'none';
+            }
+        }
+
+        // --- Core Logic ---
+        let ws = null;
+        let isRecording = false;
+        let sessionStarted = false;
+        let audioContext = null;
+        let audioWorkletNode = null;
+        let streamingPlayer = null; // 🎵 New Stream Player
+
+        // Auto-connect
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const WS_URL = `${protocol}//${window.location.host}/ws`;
+
+        // MMSE Data — 前端统一用这6个key，后端可能发 attention_calculation
+        const mmseScores = {
+            orientation: { score: 0 },
+            registration: { score: 0 },
+            attention_calculation: { score: 0 },
+            recall: { score: 0 },
+            language: { score: 0 },
+            copy: { score: 0 }
+        };
+        const emotionLabels = {
+            normal: { text: '正常', class: 'normal' },
+            avoidance: { text: '回避', class: 'avoidance' },
+            distress: { text: '困扰', class: 'distress' },
+            hostility: { text: '对抗', class: 'hostility' }
+        };
+
+        // Emotion Stats for Report
+        const emotionStats = { normal: 0, avoidance: 0, distress: 0, hostility: 0 };
+        function recordEmotion(emotion) {
+            if (emotionStats.hasOwnProperty(emotion)) {
+                emotionStats[emotion]++;
+            }
+        }
+
+        function connectWebSocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log('Connected');
+                transitionTo('idle', '已连接');
+                initCharts();
+                refreshSpeakersList();
+            };
+
+            ws.onclose = () => {
+                transitionTo('idle', '连接断开，重连中...');
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+        }
+
+        // ==========================================
+        // 🎯 统一状态机 (Unified State Machine)
+        // ==========================================
+        // 所有状态: idle → listening → processing → speaking → listening
+        //           session_loading (开场白等待)
+        // ==========================================
+
+        let currentAppState = 'idle'; // idle, listening, processing, speaking, session_loading
+
+        function transitionTo(newState, extra) {
+            const prevState = currentAppState;
+            currentAppState = newState;
+            console.log(`[状态] ${prevState} → ${newState}`, extra || '');
+
+            const orb = document.getElementById('visual-orb');
+            const badge = document.getElementById('status-display');
+            const icon = document.getElementById('status-icon');
+            const label = document.getElementById('status-text');
+            const interruptBtn = document.getElementById('interrupt-btn');
+
+            // Reset orb
+            orb.className = 'orb';
+            badge.style.opacity = '1';
+
+            switch (newState) {
+                case 'idle':
+                    label.textContent = extra || '就绪';
+                    icon.textContent = '✅';
+                    badge.style.color = 'var(--primary-color)';
+                    interruptBtn.style.display = 'none';
+                    hideThinking();
+                    break;
+
+                case 'listening':
+                    orb.classList.add('listening');
+                    icon.textContent = '👂';
+                    label.textContent = extra || '正在听...';
+                    badge.style.color = 'var(--status-listening)';
+                    interruptBtn.style.display = 'none';
+                    break;
+
+                case 'processing':
+                    orb.classList.add('thinking');
+                    icon.textContent = '🧠';
+                    label.textContent = extra || '认知分析中...';
+                    badge.style.color = 'var(--status-thinking)';
+                    interruptBtn.style.display = 'none';
+                    showThinking();
+                    break;
+
+                case 'speaking':
+                    orb.classList.add('speaking');
+                    icon.textContent = '🗣️';
+                    label.textContent = extra || '正在说...';
+                    badge.style.color = 'var(--status-speaking)';
+                    interruptBtn.style.display = 'flex';
+                    hideThinking();
+                    break;
+
+                case 'session_loading':
+                    orb.classList.add('thinking');
+                    icon.textContent = '⏳';
+                    label.textContent = extra || '正在初始化筛查...';
+                    badge.style.color = 'var(--status-thinking)';
+                    interruptBtn.style.display = 'none';
+                    showSessionLoading();
+                    break;
+            }
+        }
+
+        function handleMessage(data) {
+            console.log('[收到消息]', data.type);
+
+            if (data.type === 'vad_start') {
+                // VAD 检测到用户说话 → 停止 AI 音频
+                if (streamingPlayer) streamingPlayer.stop();
+                transitionTo('listening', '检测到语音...');
+
+            } else if (data.type === 'vad_end') {
+                // VAD 检测语音结束 → 进入处理状态
+                transitionTo('processing', '正在处理...');
+
+            } else if (data.type === 'asr_result') {
+                // ASR 识别结果 → 更新思考指示器，保持 processing 状态
+                addMessage(data.text, 'user');
+                if (currentAppState === 'processing') {
+                    updateThinkingStatus('📊 已识别回答，正在认知评估...');
+                }
+
+            } else if (data.type === 'processing_status') {
+                // 🔥 后端处理进度更新 → 保持 processing 状态，更新提示文字
+                if (currentAppState !== 'processing') {
+                    transitionTo('processing', data.text || '处理中...');
+                } else {
+                    updateThinkingStatus(data.text || '处理中...');
+                }
+
+            } else if (data.type === 'ai_response') {
+                // AI 文本回复 → 清除等待动画，显示回复文字
+                // 不切到 speaking，等首个 tts_chunk 或 tts_audio 到达才切
+                hideSessionLoading();
+                hideThinking();
+                addMessage(data.text, 'ai', data.emotion);
+                if (currentAppState === 'processing') {
+                    updateStatusBadge('🎵', '正在合成语音...', 'var(--status-thinking)');
+                }
+
+            } else if (data.type === 'tts_start') {
+                // TTS 流准备 → 只初始化播放器，不切换 UI 状态
+                if (!streamingPlayer) streamingPlayer = new StreamingAudioPlayer();
+                window._ttsStartTime = performance.now();
+                window._ttsChunkCount = 0;
+                console.log('[TTS] 播放器已就绪, AudioContext state:', streamingPlayer.audioContext.state);
+
+            } else if (data.type === 'tts_chunk') {
+                window._ttsChunkCount = (window._ttsChunkCount || 0) + 1;
+                const elapsed = window._ttsStartTime ? ((performance.now() - window._ttsStartTime) / 1000).toFixed(3) : '?';
+                const chunkSizeKB = data.chunk ? (data.chunk.length / 1024).toFixed(0) : '?';
+                const acState = streamingPlayer ? streamingPlayer.audioContext.state : 'no-player';
+                console.log(`[TTS] 🔊 收到块${window._ttsChunkCount} | t=${elapsed}s | ${chunkSizeKB}KB | AudioCtx=${acState}`);
+                
+                // TTS 音频块到达 → 首块时切换到 speaking
+                if (currentAppState !== 'speaking') {
+                    hideThinking();
+                    hideSessionLoading();
+                    transitionTo('speaking', '正在播放');
+                }
+                if (streamingPlayer) {
+                    streamingPlayer.addChunk(data.chunk, data.sample_rate || 24000);
+                    console.log(`[TTS] ▶️ 块${window._ttsChunkCount} 已加入播放队列, isPlaying=${streamingPlayer.isPlaying}`);
+                } else {
+                    console.error('[TTS] ❌ streamingPlayer 为空！音频丢失');
+                }
+
+            } else if (data.type === 'tts_end') {
+                // TTS 流结束 → 延迟切回监听
+                setTimeout(() => {
+                    if (!streamingPlayer || !streamingPlayer.isPlaying) {
+                        if (isRecording) {
+                            transitionTo('listening');
+                        } else {
+                            transitionTo('idle', '等待操作');
+                        }
+                    }
+                }, (data.duration || 2) * 1000);
+
+            } else if (data.type === 'tts_audio') {
+                // 完整音频到达 → 正式切换到播放状态
+                hideThinking();
+                hideSessionLoading();
+                if (!streamingPlayer) streamingPlayer = new StreamingAudioPlayer();
+                streamingPlayer.addChunk(data.audio, data.sample_rate);
+                transitionTo('speaking', '正在播放');
+
+            } else if (data.type === 'tts_stop' || data.type === 'stop_tts' || data.type === 'interrupt') {
+                // 打断信号
+                if (streamingPlayer) streamingPlayer.stop();
+                transitionTo('listening', '已打断');
+
+            } else if (data.type === 'update_score') {
+                updateMMSE(data.data);
+
+            } else if (data.type === 'show_image') {
+                showImage(data.image_id || data.url, data.title);
+
+            } else if (data.type === 'hide_image') {
+                hideImage();
+
+            } else if (data.type === 'pong') {
+                // Heartbeat response
+
+            } else if (data.type === 'waiting_for_info') {
+                if (!sessionStarted) {
+                    // 首次连接提示用户填写信息并打开设置面板
+                    toggleDrawer();
+                }
+
+            } else if (data.type === 'speaker_sample_added') {
+                console.log('[声纹] 样本添加:', data.message);
+                updateSampleDots(data.current, data.needed);
+                document.getElementById('enroll-status').textContent = data.message;
+
+            } else if (data.type === 'speaker_enrolled') {
+                console.log('[声纹] 注册成功:', data.message);
+                updateSampleDots(data.current || 8, data.needed || 8);
+                document.getElementById('enroll-status').textContent = '✅ 注册完成！请输入名称并保存';
+                document.getElementById('enroll-btn').disabled = true;
+                document.getElementById('enroll-btn').textContent = '✅ 已注册';
+                document.getElementById('enroll-btn').style.background = '#48bb78';
+                document.getElementById('save-speaker-btn').disabled = false;
+
+            } else if (data.type === 'speaker_reset') {
+                console.log('[声纹] 已重置');
+                updateSampleDots(0, 8);
+                document.getElementById('enroll-status').textContent = '';
+                document.getElementById('enroll-btn').disabled = false;
+                document.getElementById('enroll-btn').textContent = '🎙️ 开始录制';
+                document.getElementById('enroll-btn').style.background = '#805ad5';
+                document.getElementById('speaker-verify-toggle').checked = false;
+                document.getElementById('save-speaker-btn').disabled = true;
+                document.getElementById('speaker-name-input').value = '';
+                document.getElementById('saved-speakers').value = '';
+
+            } else if (data.type === 'speaker_verify_status') {
+                const enabled = data.enabled;
+                console.log(`[声纹] 验证状态更新：${enabled ? '开启' : '关闭'}`);
+                document.getElementById('speaker-verify-toggle').checked = enabled;
+                document.getElementById('verify-status-text').textContent = enabled ? '开启' : '关闭';
+
+            } else if (data.type === 'speaker_error') {
+                console.error('[声纹] 错误:', data.message);
+                document.getElementById('enroll-status').textContent = '❗ ' + data.message;
+
+            } else if (data.type === 'speaker_saved') {
+                console.log('[声纹] 已保存:', data.name);
+                document.getElementById('enroll-status').textContent = data.message;
+                refreshSpeakersList();
+
+            } else if (data.type === 'speaker_loaded') {
+                console.log('[声纹] 已加载:', data.name);
+                document.getElementById('enroll-status').textContent = data.message;
+                document.getElementById('enroll-btn').disabled = true;
+                document.getElementById('enroll-btn').textContent = '✅ 已加载';
+                document.getElementById('enroll-btn').style.background = '#48bb78';
+                document.getElementById('save-speaker-btn').disabled = true;
+                for (let i = 1; i <= 8; i++) {
+                    const dot = document.getElementById(`sample-${i}`);
+                    if (dot) {
+                        dot.style.background = '#48bb78';
+                        dot.style.color = 'white';
+                    }
+                }
+
+            } else if (data.type === 'speakers_list') {
+                const select = document.getElementById('saved-speakers');
+                select.innerHTML = '<option value="">请选择或新建</option>';
+                (data.speakers || []).forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    select.appendChild(option);
+                });
+                console.log('[声纹] 已保存的声纹:', data.speakers);
+            }
+        }
+
+        // --- 🎵 Robust Streaming Audio Player ---
+        // 🔥 全局共享 AudioContext（避免反复创建，确保用户手势后可用）
+        let _sharedAudioCtx = null;
+        function getSharedAudioContext() {
+            if (!_sharedAudioCtx || _sharedAudioCtx.state === 'closed') {
+                _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            // 每次获取都尝试 resume，确保不卡在 suspended
+            if (_sharedAudioCtx.state === 'suspended') {
+                _sharedAudioCtx.resume().catch(() => {});
+            }
+            return _sharedAudioCtx;
+        }
+
+        class StreamingAudioPlayer {
+            constructor() {
+                this.audioContext = getSharedAudioContext();
+                this.nextStartTime = 0;
+                this.activeSources = [];
+                this.isPlaying = false;
+                console.log('[AudioPlayer] 初始化, AudioContext state:', this.audioContext.state);
+            }
+
+            addChunk(chunkBase64, sampleRate = 24000) {
+                try {
+                    // 🔥 每次添加音频块时确保 AudioContext 是 running 状态
+                    if (this.audioContext.state === 'suspended') {
+                        this.audioContext.resume().catch(() => {});
+                    }
+
+                    const binaryString = atob(chunkBase64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    const floatArray = new Float32Array(bytes.buffer);
+                    const audioBuffer = this.audioContext.createBuffer(1, floatArray.length, sampleRate);
+                    audioBuffer.getChannelData(0).set(floatArray);
+                    this.playBuffer(audioBuffer);
+                } catch (e) {
+                    console.error('[AudioPlayer] 解码音频失败:', e);
+                }
+            }
+
+            playBuffer(audioBuffer) {
+                this.isPlaying = true;
+                const source = this.audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(this.audioContext.destination);
+
+                const currentTime = this.audioContext.currentTime;
+                const startTime = Math.max(currentTime, this.nextStartTime);
+                source.start(startTime);
+                this.nextStartTime = startTime + audioBuffer.duration;
+                this.activeSources.push(source);
+
+                source.onended = () => {
+                    const idx = this.activeSources.indexOf(source);
+                    if (idx > -1) this.activeSources.splice(idx, 1);
+                    if (this.activeSources.length === 0) {
+                        this.isPlaying = false;
+                        // 播放结束 → 自动回到监听/空闲
+                        if (isRecording) {
+                            transitionTo('listening');
+                        } else {
+                            transitionTo('idle', '等待操作');
+                        }
+                    }
+                };
+            }
+
+            stop() {
+                this.activeSources.forEach(src => { try { src.stop(); } catch (e) { } });
+                this.activeSources = [];
+                this.nextStartTime = this.audioContext.currentTime;
+                this.isPlaying = false;
+                console.log('[AudioPlayer] 已停止播放');
+                transitionTo('listening');
+            }
+
+            reset() {
+                this.stop();
+                this.nextStartTime = 0;
+            }
+        }
+
+        function interruptAI() {
+            if (streamingPlayer) streamingPlayer.stop();
+            if (ws) ws.send(JSON.stringify({ type: 'interrupt' }));
+            console.log("Interrupt sent");
+        }
+
+        // --- 🎤 Robust Recording (AudioWorklet) ---
+        // Inline AudioWorklet Processor Code
+        const audioWorkletCode = `
+            class AudioSenderProcessor extends AudioWorkletProcessor {
+                constructor() {
+                    super();
+                    this.bufferIndex = 0;
+                    this.bufferSize = 4096;
+                    this.buffer = new Float32Array(this.bufferSize);
+                }
+                process(inputs, outputs, parameters) {
+                    const input = inputs[0];
+                    if (!input || !input.length) return true;
+                    const channel = input[0];
+                    for (let i = 0; i < channel.length; i++) {
+                        this.buffer[this.bufferIndex++] = channel[i];
+                        if (this.bufferIndex >= this.bufferSize) {
+                            this.port.postMessage(this.buffer.slice());
+                            this.bufferIndex = 0;
+                        }
+                    }
+                    return true;
+                }
+            }
+            registerProcessor('audio-sender-processor', AudioSenderProcessor);
+        `;
+
+        async function toggleRecording() {
+            if (!sessionStarted) { /* check session start... */ }
+
+            if (!isRecording) {
+                // Start
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+
+                    // Add Worklet
+                    const blob = new Blob([audioWorkletCode], { type: 'application/javascript' });
+                    const url = URL.createObjectURL(blob);
+                    await audioContext.audioWorklet.addModule(url);
+
+                    const source = audioContext.createMediaStreamSource(stream);
+                    audioWorkletNode = new AudioWorkletNode(audioContext, 'audio-sender-processor');
+
+                    audioWorkletNode.port.onmessage = (e) => {
+                        if (!isRecording) return;
+                        // Convert Float32 to Int16
+                        const floatData = e.data;
+                        const int16Array = new Int16Array(floatData.length);
+                        for (let i = 0; i < floatData.length; i++) {
+                            int16Array[i] = Math.max(-32768, Math.min(32767, floatData[i] * 32768));
+                        }
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: 'audio', data: Array.from(int16Array) }));
+                        }
+                    };
+
+                    source.connect(audioWorkletNode);
+                    audioWorkletNode.connect(audioContext.destination); // For keep-alive? usually not needed for recording context
+
+                    isRecording = true;
+                    document.getElementById('mic-btn').classList.add('recording');
+                    transitionTo('listening');
+
+                } catch (err) {
+                    console.error(err);
+                    alert("麦克风错误: " + err.message);
+                }
+            } else {
+                // Stop
+                isRecording = false;
+                if (audioContext) audioContext.close();
+                document.getElementById('mic-btn').classList.remove('recording');
+                // 🔥 统一: 进入处理状态（含思考动画）
+                transitionTo('processing', '正在处理...');
+                ws.send(JSON.stringify({ type: 'stop_recording' }));
+            }
+        }
+
+        function sendTextMessage() {
+            const input = document.getElementById('text-input');
+            const text = input.value.trim();
+            if (!text) return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('未连接到服务器');
+                return;
+            }
+            addMessage(text, 'user');
+            ws.send(JSON.stringify({ type: 'text', data: text }));
+            input.value = '';
+            // 🔥 统一: 进入处理状态（含思考动画）
+            transitionTo('processing', '正在思考...');
+        }
+
+        // --- UI Helpers ---
+
+        // 🔥 只更新状态徽章文字（不切换整体状态）
+        function updateStatusBadge(icon, text, color) {
+            const badge = document.getElementById('status-display');
+            const iconEl = document.getElementById('status-icon');
+            const label = document.getElementById('status-text');
+            if (icon) iconEl.textContent = icon;
+            if (text) label.textContent = text;
+            if (color) badge.style.color = color;
+            badge.style.opacity = '1';
+        }
+
+        // 🔥 兼容旧代码的 updateStatus（内部全部走 transitionTo）
+        function updateStatus(state, text) {
+            transitionTo(state === 'connected' ? 'idle' : state, text);
+        }
+
+        function addMessage(text, role, emotionCategory) {
+            const stream = document.getElementById('conversation-stream');
+            const div = document.createElement('div');
+            div.className = `message-row ${role}`;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+
+            let content = text;
+            if (emotionCategory && emotionLabels[emotionCategory]) {
+                content += `<span class="emotion-label">${emotionLabels[emotionCategory].text}</span>`;
+                recordEmotion(emotionCategory);
+            }
+
+            bubble.innerHTML = content;
+            div.appendChild(bubble);
+            stream.appendChild(div);
+
+            setTimeout(() => { stream.scrollTop = stream.scrollHeight; }, 100);
+        }
+
+        // ==========================================
+        // 🧠 Thinking Indicator (统一版)
+        // ==========================================
+        let thinkingElement = null;
+        const thinkingSteps = [
+            '🧠 分析认知回答...',
+            '📋 评估认知维度...',
+            '🔍 综合判断中...',
+            '💬 生成回复...'
+        ];
+        let thinkingStepIndex = 0;
+        let thinkingInterval = null;
+        let thinkingStartTime = 0;
+
+        function showThinking() {
+            hideThinking(); // 清除已有的
+
+            thinkingStartTime = Date.now();
+            const stream = document.getElementById('conversation-stream');
+            const wrapper = document.createElement('div');
+            wrapper.className = 'message-row ai';
+            wrapper.id = 'thinking-wrapper';
+
+            wrapper.innerHTML = `
+                <div class="thinking-bubble">
+                    <div class="thinking-icon"><i class="fas fa-brain"></i></div>
+                    <div class="thinking-content">
+                        <div class="thinking-title">
+                            AI 正在分析
+                            <div class="thinking-dots">
+                                <span></span><span></span><span></span>
+                            </div>
+                        </div>
+                        <div class="thinking-status" id="thinking-status-text">${thinkingSteps[0]}</div>
+                        <div class="thinking-progress">
+                            <div class="thinking-progress-bar"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            stream.appendChild(wrapper);
+            thinkingElement = wrapper;
+            thinkingStepIndex = 0;
+
+            // 自动轮播提示文字
+            thinkingInterval = setInterval(() => {
+                thinkingStepIndex = (thinkingStepIndex + 1) % thinkingSteps.length;
+                const statusEl = document.getElementById('thinking-status-text');
+                if (statusEl) {
+                    statusEl.style.opacity = '0';
+                    setTimeout(() => {
+                    statusEl.textContent = thinkingSteps[thinkingStepIndex];
+                        statusEl.style.opacity = '1';
+                    }, 200);
+                }
+            }, 2000);
+
+            setTimeout(() => { stream.scrollTop = stream.scrollHeight; }, 100);
+        }
+
+        function hideThinking() {
+            if (thinkingInterval) {
+                clearInterval(thinkingInterval);
+                thinkingInterval = null;
+            }
+            const existing = document.getElementById('thinking-wrapper');
+            if (existing) {
+                existing.style.animation = 'fadeOut 0.3s ease forwards';
+                setTimeout(() => existing.remove(), 300);
+            }
+            thinkingElement = null;
+        }
+
+        function updateThinkingStatus(text) {
+            const statusEl = document.getElementById('thinking-status-text');
+            if (statusEl) {
+                statusEl.style.opacity = '0';
+                setTimeout(() => {
+                statusEl.textContent = text;
+                    statusEl.style.opacity = '1';
+                }, 150);
+            }
+        }
+
+        // ==========================================
+        // ⏳ Session Loading（开场白等待动画）
+        // ==========================================
+        function showSessionLoading() {
+            hideThinking(); // 不和 thinking 重叠
+            hideSessionLoading();
+
+            const stream = document.getElementById('conversation-stream');
+            const wrapper = document.createElement('div');
+            wrapper.className = 'message-row ai';
+            wrapper.id = 'session-loading-wrapper';
+
+            wrapper.innerHTML = `
+                <div class="session-loading">
+                    <div class="loading-wave">
+                        <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                    </div>
+                    <div class="loading-text">🧠 正在准备认知筛查...</div>
+                    <div class="loading-sub">请稍候，AI正在初始化评估流程</div>
+                </div>
+            `;
+
+            stream.appendChild(wrapper);
+            setTimeout(() => { stream.scrollTop = stream.scrollHeight; }, 100);
+        }
+
+        function hideSessionLoading() {
+            const existing = document.getElementById('session-loading-wrapper');
+            if (existing) {
+                existing.style.animation = 'fadeOut 0.3s ease forwards';
+                setTimeout(() => existing.remove(), 300);
+            }
+        }
+
+        // --- MMSE & Session Logic ---
+        function startSession() {
+            const name = document.getElementById('patient-name').value;
+            if (!name) { alert("请输入姓名"); return; }
+
+            ws.send(JSON.stringify({
+                type: 'start_session',
+                profile: {
+                    name: name,
+                    age: document.getElementById('patient-age').value,
+                    gender: document.getElementById('patient-sex').value
+                }
+            }));
+
+            sessionStarted = true;
+            toggleDrawer(); // 关闭抽屉
+            document.getElementById('end-btn').disabled = false;
+            document.getElementById('start-btn').disabled = true;
+            document.getElementById('start-btn').textContent = '✅ 进行中';
+
+            // 🔥 在用户手势上下文中预激活 AudioContext（必须在 click handler 中）
+            // 这样后续 tts_chunk 到达时 AudioContext 已经是 running 状态
+            const ctx = getSharedAudioContext();
+            console.log('[Session] 预激活 AudioContext, state:', ctx.state);
+
+            // 🔥 显示开场白等待动画
+            transitionTo('session_loading', '正在准备问候语...');
+        }
+
+        function endSession() {
+            if (confirm("确定结束会话吗？结束后可导出报告或开始新会话。")) {
+                ws.send(JSON.stringify({ type: 'end_session' }));
+                sessionStarted = false;
+                document.getElementById('end-btn').disabled = true;
+
+                // Allow restart
+                document.getElementById('start-btn').disabled = false;
+                document.getElementById('start-btn').innerHTML = '🚀 开始新会话';
+
+                toggleDrawer(); // Show results
+                addMessage("系统: 会话已结束。可在右侧导出报告或重新开始。", "ai");
+            }
+        }
+
+        function updateMMSE(data) {
+            console.log('[MMSE] 收到评分数据:', JSON.stringify(data).slice(0, 300));
+
+            const display = document.getElementById('mmse-total-score');
+
+            // ① 从后端数据中提取维度得分
+            // 后端路径: data.scoring_details.dimension_scores.{orientation, registration, attention_calculation, recall, language, copy}
+            const dimScores = data?.scoring_details?.dimension_scores || {};
+            if (Object.keys(dimScores).length > 0) {
+                Object.keys(dimScores).forEach(key => {
+                    if (mmseScores[key]) {
+                        const val = dimScores[key].score !== undefined ? dimScores[key].score : 0;
+                        mmseScores[key].score = val;
+                    }
+                });
+            }
+
+            // ② 计算总分（前端自己从维度相加，更可靠）
+            const totalScore = Object.values(mmseScores).reduce((sum, d) => sum + (d.score || 0), 0);
+            display.textContent = `${totalScore}/30`;
+
+            // ③ 更新认知状态文字
+            const statusEl = document.getElementById('mmse-status');
+            if (statusEl) {
+                if (data.cognitive_status && data.cognitive_status !== '未评估') {
+                    statusEl.textContent = data.cognitive_status;
+                } else if (totalScore > 0) {
+                    statusEl.textContent = totalScore >= 27 ? '认知正常' :
+                        totalScore >= 21 ? '轻度障碍' :
+                        totalScore >= 10 ? '中度障碍' : '重度障碍';
+                } else {
+                    statusEl.textContent = '评估中';
+                }
+            }
+
+            // ④ 维度定义（前端展示用）
+            const dimensions = [
+                { id: 'orientation', label: '定向力', max: 10 },
+                { id: 'registration', label: '即时记忆', max: 3 },
+                { id: 'attention_calculation', label: '注意与计算', max: 5 },
+                { id: 'recall', label: '回忆能力', max: 3 },
+                { id: 'language', label: '语言能力', max: 8 },
+                { id: 'copy', label: '视空间', max: 1 }
+            ];
+
+            // ⑤ 重新渲染维度列表
+            const list = document.getElementById('mmse-dimensions');
+            list.innerHTML = '';
+            dimensions.forEach(dim => {
+                const score = mmseScores[dim.id]?.score || 0;
+                const pct = dim.max > 0 ? (score / dim.max) * 100 : 0;
+                const barColor = pct >= 80 ? '#38A169' : pct >= 50 ? '#D69E2E' : pct > 0 ? '#E53E3E' : '#CBD5E0';
+                const row = document.createElement('div');
+                row.style.marginBottom = '0.8rem';
+                row.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.3rem;">
+                        <span style="font-weight: 600; color: var(--text-primary);">${dim.label}</span>
+                        <span style="color: var(--primary-color); font-weight: 700;">${score}/${dim.max}</span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: #EDF2F7; border-radius: 4px; overflow: hidden;">
+                        <div style="width: ${pct}%; height: 100%; background: ${barColor}; border-radius: 4px; transition: width 0.6s ease;"></div>
+                    </div>
+                `;
+                list.appendChild(row);
+            });
+
+            // ⑥ 真正更新雷达图数据
+            if (window.radarChart) {
+                window.radarChart.data.datasets[0].data = dimensions.map(dim => mmseScores[dim.id]?.score || 0);
+                window.radarChart.update();
+            }
+
+            console.log('[MMSE] 更新完成, 总分:', totalScore, '维度:', JSON.stringify(mmseScores));
+        }
+
+        function initCharts() {
+            if (window.radarChart) return; // 防止重复初始化
+            const ctx = document.getElementById('mmse-radar-chart');
+            if (!ctx) return;
+            // 各维度满分: 定向10, 记忆3, 注意5, 回忆3, 语言8, 临摹1
+            window.radarChart = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: ['定向(10)', '记忆(3)', '注意(5)', '回忆(3)', '语言(8)', '临摹(1)'],
+                    datasets: [{
+                        label: '得分',
+                        data: [0, 0, 0, 0, 0, 0],
+                        backgroundColor: 'rgba(74, 144, 164, 0.2)',
+                        borderColor: '#4A90A4',
+                        pointBackgroundColor: '#4A90A4',
+                        borderWidth: 2,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    scales: {
+                        r: {
+                            max: 10,
+                            min: 0,
+                            ticks: { display: false, stepSize: 2 },
+                            pointLabels: { font: { size: 11 } }
+                        }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        function showImage(url, title) {
+            document.getElementById('image-modal').style.display = 'flex';
+            document.getElementById('display-image').src = url;
+            document.getElementById('image-title').textContent = title || "请看图";
+        }
+
+        function hideImage() {
+            document.getElementById('image-modal').style.display = 'none';
+        }
+
+        // ===== Speaker Verification Logic =====
+        let enrollMediaStream = null;
+        let enrollRecorder = null;
+        let enrollChunks = [];
+        let isEnrolling = false;
+
+        function toggleSpeakerVerify(enabled) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('未连接服务器');
+                document.getElementById('speaker-verify-toggle').checked = false;
+                return;
+            }
+
+            ws.send(JSON.stringify({
+                type: 'toggle_speaker_verify',
+                enabled: enabled
+            }));
+
+            document.getElementById('verify-status-text').textContent = enabled ? '开启' : '关闭';
+            console.log(`[声纹] 验证${enabled ? '开启' : '关闭'}`);
+        }
+
+        function updateThreshold(value) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('未连接服务器');
+                return;
+            }
+
+            const threshold = parseFloat(value);
+            document.getElementById('threshold-val').textContent = threshold.toFixed(2);
+            ws.send(JSON.stringify({
+                type: 'update_speaker_threshold',
+                threshold: threshold
+            }));
+
+            console.log(`[声纹] 阈值更新为: ${threshold}`);
+        }
+
+        function saveSpeaker() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('未连接服务器');
+                return;
+            }
+
+            const nameInput = document.getElementById('speaker-name-input');
+            const name = nameInput.value.trim();
+
+            if (!name) {
+                alert('请输入说话人名称');
+                nameInput.focus();
+                return;
+            }
+
+            ws.send(JSON.stringify({ type: 'save_speaker', name: name }));
+            console.log(`[声纹] 保存声纹: ${name}`);
+        }
+
+        function loadSelectedSpeaker() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const select = document.getElementById('saved-speakers');
+            const name = select.value;
+
+            if (!name) return;
+
+            ws.send(JSON.stringify({ type: 'load_speaker', name: name }));
+            document.getElementById('speaker-name-input').value = name;
+            console.log(`[声纹] 加载声纹: ${name}`);
+        }
+
+        function refreshSpeakersList() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'list_speakers' }));
+        }
+
+        async function toggleEnrollRecording() {
+            if (isEnrolling) {
+                stopEnrollRecording();
+            } else {
+                await startEnrollRecording();
+            }
+        }
+
+        async function startEnrollRecording() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('请先连接服务器');
+                return;
+            }
+
+            try {
+                enrollMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                enrollRecorder = new MediaRecorder(enrollMediaStream, { mimeType: 'audio/webm' });
+                enrollChunks = [];
+
+                enrollRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) enrollChunks.push(e.data);
+                };
+
+                enrollRecorder.onstop = async () => {
+                    const blob = new Blob(enrollChunks, { type: 'audio/webm' });
+
+                    // 转换为PCM并发送
+                    const arrayBuffer = await blob.arrayBuffer();
+                    const audioCtx = new AudioContext({ sampleRate: 16000 });
+                    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                    const pcmData = audioBuffer.getChannelData(0);
+
+                    // 转为Int16
+                    const int16Array = new Int16Array(pcmData.length);
+                    for (let i = 0; i < pcmData.length; i++) {
+                        int16Array[i] = Math.max(-32768, Math.min(32767, pcmData[i] * 32768));
+                    }
+
+                    // Base64编码发送
+                    const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Array.buffer)));
+                    ws.send(JSON.stringify({ type: 'enroll_speaker_sample', audio: base64 }));
+
+                    document.getElementById('enroll-status').textContent = '处理中...';
+                    audioCtx.close();
+                };
+
+                enrollRecorder.start();
+                isEnrolling = true;
+                document.getElementById('enroll-btn').textContent = '⏹️ 停止录制';
+                document.getElementById('enroll-btn').style.background = '#e53e3e';
+                document.getElementById('enroll-status').textContent = '录制中...请说话';
+
+            } catch (err) {
+                console.error('录制失败:', err);
+                alert('无法访问麦克风');
+            }
+        }
+
+        function stopEnrollRecording() {
+            if (enrollRecorder && enrollRecorder.state === 'recording') {
+                enrollRecorder.stop();
+            }
+            if (enrollMediaStream) {
+                enrollMediaStream.getTracks().forEach(t => t.stop());
+            }
+            isEnrolling = false;
+            document.getElementById('enroll-btn').textContent = '🎙️ 开始录制';
+            document.getElementById('enroll-btn').style.background = 'var(--primary-dark)';
+        }
+
+        function updateSampleDots(current, needed) {
+            for (let i = 1; i <= 8; i++) {
+                const dot = document.getElementById(`sample-${i}`);
+                if (dot) {
+                    if (i <= current) {
+                        dot.style.background = '#48bb78';
+                        dot.style.color = 'white';
+                    } else {
+                        dot.style.background = '#e2e8f0';
+                        dot.style.color = '#666';
+                    }
+                }
+            }
+        }
+
+        // Export PDF - Complete Implementation
+        async function exportReport() {
+            const btn = document.getElementById('export-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 生成中...';
+
+            try {
+                // 获取患者信息
+                const patientName = document.getElementById('patient-name')?.value || '未填写';
+                const patientAge = document.getElementById('patient-age')?.value || '未填写';
+                const patientSex = document.getElementById('patient-sex')?.value || '未填写';
+
+                // 计算总分（使用与后端一致的维度key）
+                const totalScore = (mmseScores.orientation?.score || 0) +
+                    (mmseScores.registration?.score || 0) +
+                    (mmseScores.attention_calculation?.score || 0) +
+                    (mmseScores.recall?.score || 0) +
+                    (mmseScores.language?.score || 0) +
+                    (mmseScores.copy?.score || 0);
+
+                // 认知水平判断
+                let cogLevel = '', levelColor = '#48bb78';
+                if (totalScore >= 27) {
+                    cogLevel = '认知功能正常'; levelColor = '#48bb78';
+                } else if (totalScore >= 21) {
+                    cogLevel = '轻度认知障碍'; levelColor = '#ecc94b';
+                } else if (totalScore >= 10) {
+                    cogLevel = '中度认知障碍'; levelColor = '#E8925B';
+                } else {
+                    cogLevel = '重度认知障碍'; levelColor = '#e53e3e';
+                }
+
+                // 情绪统计
+                const totalEmotions = emotionStats.normal + emotionStats.avoidance + emotionStats.distress + emotionStats.hostility;
+                const emotionHtml = totalEmotions > 0 ? `
+                    <p>正常: ${emotionStats.normal} 次 (${Math.round(emotionStats.normal / totalEmotions * 100)}%)</p>
+                    <p>回避: ${emotionStats.avoidance} 次 (${Math.round(emotionStats.avoidance / totalEmotions * 100)}%)</p>
+                    <p>困扰: ${emotionStats.distress} 次 (${Math.round(emotionStats.distress / totalEmotions * 100)}%)</p>
+                    <p>对抗: ${emotionStats.hostility} 次 (${Math.round(emotionStats.hostility / totalEmotions * 100)}%)</p>
+                ` : '<p>暂无情绪数据记录</p>';
+
+                // AI 建议
+                const recommendations = generateAIRecommendations(totalScore, mmseScores, emotionStats);
+
+                // 截取雷达图
+                let radarImgSrc = '';
+                try {
+                    const radarCanvas = document.getElementById('mmse-radar-chart');
+                    if (radarCanvas && window.radarChart) {
+                        radarImgSrc = radarCanvas.toDataURL('image/png');
+                    }
+                } catch (e) {
+                    console.warn('雷达图截图失败:', e);
+                }
+
+                // 创建报告 HTML
+                const reportDate = new Date().toLocaleDateString('zh-CN', {
+                    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+
+                const reportHtml = `
+                    <div id="pdf-report-content" style="width: 600px; padding: 40px; font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; background: white;">
+                        <h1 style="text-align: center; color: #4A90A4; margin-bottom: 5px;">阿尔茨海默病认知筛查报告</h1>
+                        <p style="text-align: center; color: #666; margin-bottom: 5px; font-size: 14px;">基于 MMSE (简易精神状态检查) 量表</p>
+                        <p style="text-align: center; color: #888; margin-bottom: 30px;">生成时间: ${reportDate}</p>
+                        
+                        <h2 style="color: #2d3748; border-left: 4px solid #4A90A4; padding-left: 10px;">患者信息</h2>
+                        <p>姓名: ${patientName}</p>
+                        <p>年龄: ${patientAge} 岁</p>
+                        <p>性别: ${patientSex}</p>
+                        
+                        <h2 style="color: #2d3748; border-left: 4px solid #4A90A4; padding-left: 10px; margin-top: 25px;">评分总览</h2>
+                        <p style="font-size: 24px; font-weight: bold; color: #4A90A4;">总分: ${totalScore} / 30</p>
+                        <p style="color: ${levelColor}; font-weight: bold;">评估结论: ${cogLevel}</p>
+                        
+                        <h3 style="color: #4a5568; margin-top: 20px;">各维度得分</h3>
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #eee;">定向力</td><td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${mmseScores.orientation?.score || 0}/10</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #eee;">即时记忆</td><td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${mmseScores.registration?.score || 0}/3</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #eee;">注意力与计算</td><td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${mmseScores.attention_calculation?.score || 0}/5</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #eee;">延迟回忆</td><td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${mmseScores.recall?.score || 0}/3</td></tr>
+                            <tr><td style="padding: 8px; border-bottom: 1px solid #eee;">语言能力</td><td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: bold;">${mmseScores.language?.score || 0}/8</td></tr>
+                            <tr><td style="padding: 8px;">视空间能力 (临摹)</td><td style="padding: 8px; text-align: right; font-weight: bold;">${mmseScores.copy?.score || 0}/1</td></tr>
+                        </table>
+                        
+                        <h2 style="color: #2d3748; border-left: 4px solid #4A90A4; padding-left: 10px; margin-top: 25px;">情绪分布统计</h2>
+                        ${emotionHtml}
+                        
+                        ${radarImgSrc ? `
+                        <h2 style="color: #2d3748; border-left: 4px solid #4A90A4; padding-left: 10px; margin-top: 25px;">维度分布图</h2>
+                        <img src="${radarImgSrc}" style="max-width: 100%; margin-top: 10px;"/>
+                        ` : ''}
+                        
+                        <h2 style="color: #2d3748; border-left: 4px solid #4A90A4; padding-left: 10px; margin-top: 25px;">AI 评估建议</h2>
+                        ${recommendations.map(r => `<p>${r}</p>`).join('')}
+                    </div>
+                `;
+
+                // 创建临时容器
+                const tempContainer = document.createElement('div');
+                tempContainer.innerHTML = reportHtml;
+                tempContainer.style.position = 'absolute';
+                tempContainer.style.left = '-9999px';
+                tempContainer.style.top = '0';
+                document.body.appendChild(tempContainer);
+
+                // 使用 html2canvas 截取并生成 PDF
+                const reportElement = tempContainer.querySelector('#pdf-report-content');
+                const canvas = await html2canvas(reportElement, {
+                    scale: 2,
+                    backgroundColor: '#ffffff',
+                    useCORS: true
+                });
+
+                // 计算 PDF 尺寸
+                const imgWidth = 210; // A4 宽度 mm
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF('p', 'mm', 'a4');
+
+                doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, imgHeight);
+
+                // 清理临时容器
+                document.body.removeChild(tempContainer);
+
+                // 下载
+                const fileName = `AD认知筛查报告_${patientName}_${new Date().toISOString().slice(0, 10)}.pdf`;
+                doc.save(fileName);
+
+            } catch (error) {
+                console.error('PDF 生成失败:', error);
+                alert('报告生成失败，请重试: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-file-pdf"></i> 导出评估报告';
+            }
+        }
+
+        // AI Recommendations Generator
+        function generateAIRecommendations(totalScore, scores, emotions) {
+            const recommendations = [];
+
+            // 总体评估
+            if (totalScore >= 27) {
+                recommendations.push('• 整体认知功能良好，建议继续保持健康生活方式和社交活动。');
+            } else if (totalScore >= 21) {
+                recommendations.push('• 存在轻度认知功能下降，建议进行定期复查，并增加认知训练活动。');
+            } else if (totalScore >= 10) {
+                recommendations.push('• 存在中度认知障碍，强烈建议前往神经内科进行进一步检查和评估。');
+            } else {
+                recommendations.push('• 存在重度认知障碍，需要专业医疗介入和护理支持。');
+            }
+
+            // 维度分析（key与后端一致：attention_calculation）
+            if ((scores.orientation?.score || 0) < 8) {
+                recommendations.push('• 定向力得分偏低，可考虑在日常生活中加强时间和地点提醒，使用日历、钟表等辅助工具。');
+            }
+            if ((scores.registration?.score || 0) < 2) {
+                recommendations.push('• 即时记忆能力偏弱，建议通过重复、联想等方法加强短期记忆训练。');
+            }
+            if ((scores.attention_calculation?.score || 0) < 3) {
+                recommendations.push('• 注意力与计算能力需要加强，可尝试简单的数学游戏或拼图活动。');
+            }
+            if ((scores.recall?.score || 0) < 2) {
+                recommendations.push('• 延迟回忆能力较弱，建议通过日记、备忘录等辅助记忆，是阿尔茨海默病早期筛查的重要指标。');
+            }
+            if ((scores.language?.score || 0) < 6) {
+                recommendations.push('• 语言能力需要关注，鼓励多参与对话和阅读活动。');
+            }
+            if ((scores.copy?.score || 0) < 1) {
+                recommendations.push('• 视空间能力有待评估，建议关注日常生活中的空间定位能力。');
+            }
+
+            // 情绪分析
+            const totalEmotions = emotions.normal + emotions.avoidance + emotions.distress + emotions.hostility;
+            if (totalEmotions > 0) {
+                const negativeRatio = (emotions.avoidance + emotions.distress + emotions.hostility) / totalEmotions;
+                if (negativeRatio > 0.5) {
+                    recommendations.push('• 对话中检测到较多负面情绪表达，建议关注心理健康状况。');
+                }
+            }
+
+            return recommendations.length > 0 ? recommendations : ['• 暂无特别建议，请继续保持良好的生活习惯。'];
+        }
+
+        // Init — 初始渲染维度列表 + 雷达图
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            // 渲染初始维度列表（全0分）
+            updateMMSE({ scoring_details: { dimension_scores: {} } });
+        });
+
+        connectWebSocket();
+
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,14 @@
+{
+    "location": {
+        "province": "辽宁省",
+        "city": "大连市",
+        "district": "",
+        "place": "家中",
+        "country": "中国",
+        "lat": 38.87017096392962,
+        "lon": 121.51481051689521,
+        "source": "browser-geolocation"
+    },
+    "updated_at": "2026-01-03T13:53:14.596756",
+    "auto_detected": true
+}

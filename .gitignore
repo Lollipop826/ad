@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# Virtualenv / local env
+venv/
+.venv/
+ENV/
+env/
+
+# Secrets
+.env
+.env.storage
+
+# OS / IDE
+.DS_Store
+.vscode/
+
+# Runtime / logs
+.run_logs/
+logs/
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large artifacts / downloads
+*.whl
+*.pt
+*.pth
+*.bin
+*.onnx
+*.ckpt
+
+# Local model/data directories (very large)
+models/
+data/
+kb/
+
+# Vendored/third-party source drops (optional; keep repo lean)
+PaddleSpeech/
+Paddle-3.2.0/
+ZipVoice-master/
+
+# Vector DB / cache (keep KB sources, ignore generated index if present)
+kb/.chroma_semantic/
+kb/**/.chroma*/
+
+# Misc
+~/
+
+# Backups / editor artifacts
+*.bak
+*_backup.*
+
+# Demo audio assets (local only)
+static/audio/
