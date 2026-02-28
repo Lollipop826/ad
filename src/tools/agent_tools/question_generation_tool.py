@@ -239,6 +239,7 @@ class QuestionGenerationTool(BaseTool):
         patient_gender: Optional[str] = None,
         patient_age: Optional[int] = None,
         user_answer: Optional[str] = None,
+        patient_emotion: Optional[str] = None,
     ) -> str:
         """当 ack 被清空时，补一条简短的非问句回应，保留过渡感。"""
         import re
@@ -251,11 +252,18 @@ class QuestionGenerationTool(BaseTool):
                 snippet = candidate
 
         if user_answer and any(m in user_answer for m in refusal_markers):
-            base = "没关系，不想回答也行，咱们慢慢聊。"
+            base = "没关系，不想回答也行，咱们先聊点轻松的。"
+        elif patient_emotion in {"sad", "fear"}:
+            base = "我知道您现在有点不舒服，咱慢慢来，不着急。"
+        elif patient_emotion == "angry":
+            base = "我明白您有点烦，咱先放轻松一点。"
         elif snippet:
-            base = f"您刚说{snippet}，我听着挺好。"
+            if any(k in snippet for k in ["还可以", "一般", "凑合", "舒畅", "开心", "不错"]):
+                base = f"明白，您刚说{snippet}。"
+            else:
+                base = f"原来是这样，您刚说{snippet}。"
         else:
-            base = "听您这么说我也挺高兴的。"
+            base = "明白了，咱慢慢聊。"
 
         if patient_name:
             if patient_gender == '男':
@@ -356,6 +364,8 @@ class QuestionGenerationTool(BaseTool):
             "6) 避免空泛问法，如“最近有什么新鲜事分享一下”。\n"
             "7) 可用轻量选择式问法（如“您更喜欢A还是B”），但不要连环追问。\n"
             "8) 不要输出任何解释、前后缀或 Markdown。"
+            "9) ack 必须和对方原话直接相关，禁止“我听着挺好”这类空泛附和。\n"
+            "10) 若对方表达拒绝/低落，ack 先接纳情绪，再轻柔转话题，禁止硬夸赞。"
         )
         
         user_prompt_parts = []
@@ -562,7 +572,9 @@ class QuestionGenerationTool(BaseTool):
                     q = self._rewrite_open_question(q, topic_hint, dimension_name)
                 ack = self._sanitize_ack(ack, q)
                 if not ack and q:
-                    ack = self._build_ack_fallback(patient_name, patient_gender, patient_age, last_user_msg)
+                    ack = self._build_ack_fallback(
+                        patient_name, patient_gender, patient_age, last_user_msg, patient_emotion
+                    )
                 
                 print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
                 
@@ -603,7 +615,9 @@ class QuestionGenerationTool(BaseTool):
                         q = self._rewrite_open_question(q, topic_hint, dimension_name)
                     ack = self._sanitize_ack(ack, q)
                     if not ack and q:
-                        ack = self._build_ack_fallback(patient_name, patient_gender, patient_age, last_user_msg)
+                        ack = self._build_ack_fallback(
+                            patient_name, patient_gender, patient_age, last_user_msg, patient_emotion
+                        )
                     print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
                     if ack and q:
                         question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
