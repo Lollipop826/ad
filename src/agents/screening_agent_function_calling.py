@@ -1371,11 +1371,11 @@ class ADScreeningAgentFunctionCalling:
         self.consecutive_failures = 0
 
     def _get_max_consecutive_buffer_chat(self) -> int:
-        """读取连续 buffer 上限，默认 1（最多连续一轮闲聊）。"""
+        """读取连续 buffer 上限，默认 2（最多连续两轮闲聊）。"""
         try:
-            limit = int(os.getenv("MAX_CONSECUTIVE_BUFFER_CHAT", "1"))
+            limit = int(os.getenv("MAX_CONSECUTIVE_BUFFER_CHAT", "2"))
         except ValueError:
-            limit = 1
+            limit = 2
         return max(0, limit)
 
     def _select_next_task(self) -> Optional[str]:
@@ -1425,6 +1425,31 @@ class ADScreeningAgentFunctionCalling:
                     continue
             
             candidates.append(task_id)
+
+        # 🔥 阶段门槛：基础闲聊+定向未完成前，不提前进入复杂指令/计算任务
+        basic_prereq = {
+            "persona_collect_1",
+            "persona_collect_2",
+            "orientation_time_weekday",
+            "orientation_time_date_month_season",
+            "orientation_place_city_district",
+        }
+        advanced_tasks = {
+            "attention_calc_life_math",
+            "registration_3words",
+            "recall_3words",
+            "language_naming_watch",
+            "language_naming_pencil",
+            "language_repetition_sentence",
+            "language_reading_close_eyes",
+            "language_3step_action",
+        }
+        if not basic_prereq.issubset(self._task_done):
+            filtered = [t for t in candidates if t not in advanced_tasks]
+            if filtered:
+                if len(filtered) != len(candidates):
+                    print("[TaskPool] 🧭 基础阶段：暂不进入复杂任务，优先闲聊/定向")
+                candidates = filtered
         
         # 🔥 保存候选任务供异步分类使用
         self._available_candidates = candidates.copy()
@@ -2606,35 +2631,49 @@ class ADScreeningAgentFunctionCalling:
                     # 从 topic 中提取（topic 格式可能是 "吃饭→算术" 或 "算术"）
                     topic_text = topic.split("→")[-1].strip() if "→" in topic else topic.strip()
 
-                    # 全量使用 LLM 判断话题映射，不走关键词优先
-                    from src.llm.http_client_pool import get_siliconflow_chat_openai
-                    background_model = os.getenv(
-                        "BACKGROUND_ANALYSIS_MODEL",
-                        os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-                    )
-                    llm = get_siliconflow_chat_openai(
-                        model=background_model,
-                        temperature=0.3,
-                        timeout=10,
-                        max_retries=1,
-                    )
+                    # 仅允许将话题映射到轻量任务，避免直接跳到复杂动作/计算任务
+                    topic_mappable = {
+                        "persona_collect_1",
+                        "persona_collect_2",
+                        "orientation_time_weekday",
+                        "orientation_time_date_month_season",
+                        "orientation_place_city_district",
+                    }
+                    mappable_tasks = [t for t in undone_tasks if t in topic_mappable]
+                    if not mappable_tasks:
+                        print(f"[AgentFC-Background] ℹ️ 当前无可话题直达的轻量任务，跳过 topic 映射")
+                        mappable_tasks = []
 
-                    prompt_topic = f"""当前对话正过渡到话题：「{topic_text}」。
+                    # 全量使用 LLM 判断话题映射，不走关键词优先
+                    if mappable_tasks:
+                        from src.llm.http_client_pool import get_siliconflow_chat_openai
+                        background_model = os.getenv(
+                            "BACKGROUND_ANALYSIS_MODEL",
+                            os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+                        )
+                        llm = get_siliconflow_chat_openai(
+                            model=background_model,
+                            temperature=0.3,
+                            timeout=10,
+                            max_retries=1,
+                        )
+
+                        prompt_topic = f"""当前对话正过渡到话题：「{topic_text}」。
 请判断这个话题是否直接对应以下待完成任务之一：
-{', '.join(undone_tasks)}
+{', '.join(mappable_tasks)}
 
 如果对应，输出任务ID。
 否则输出 None。
 只输出结果，不要解释。"""
-                    res = await llm.ainvoke([{"role": "user", "content": prompt_topic}])
-                    res_content = res.content.strip()
+                        res = await llm.ainvoke([{"role": "user", "content": prompt_topic}])
+                        res_content = res.content.strip()
 
-                    if res_content in undone_tasks:
-                        print(f"[AgentFC-Background] 🎯 Topic命中（LLM）：'{topic_text}' -> {res_content}")
-                        self._precomputed_next_task = res_content
-                        self._consecutive_buffer_count = 0  # 重置计数器
-                    else:
-                        print(f"[AgentFC-Background] ℹ️ Topic未命中任何任务: '{topic_text}' -> '{res_content}'")
+                        if res_content in mappable_tasks:
+                            print(f"[AgentFC-Background] 🎯 Topic命中（LLM）：'{topic_text}' -> {res_content}")
+                            self._precomputed_next_task = res_content
+                            self._consecutive_buffer_count = 0  # 重置计数器
+                        else:
+                            print(f"[AgentFC-Background] ℹ️ Topic未命中任何任务: '{topic_text}' -> '{res_content}'")
                             
             except Exception as e:
                 print(f"[AgentFC-Background] ⚠️ Topic映射失败: {e}")
