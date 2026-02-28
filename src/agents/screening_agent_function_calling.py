@@ -2603,69 +2603,38 @@ class ADScreeningAgentFunctionCalling:
                 if not undone_tasks:
                     print(f"[AgentFC-Background] ✅ 所有任务已完成，跳过映射")
                 else:
-                    # 🔥 先用关键词预筛（快速，不需要 LLM）
-                    _TOPIC_TASK_KEYWORDS = {
-                        "orientation_time_weekday": ["星期", "周几", "今天"],
-                        "orientation_time_date_month_season": ["日期", "几月", "季节", "几号"],
-                        "orientation_place_city_district": ["城市", "住哪", "地方", "地址", "区"],
-                        "persona_collect_1": ["爱好", "兴趣", "喜欢"],
-                        "persona_collect_2": ["习惯", "作息", "起床", "吃"],
-                        "registration_3words": ["记忆", "记词", "记住"],
-                        "recall_3words": ["回忆", "想起", "刚才的词"],
-                        "attention_calc_life_math": ["算术", "计算", "减法", "算账", "算钱"],
-                        "language_naming_watch": ["手表", "时间工具"],
-                        "language_naming_pencil": ["铅笔", "写字工具"],
-                        "language_repetition_sentence": ["复述", "重复"],
-                        "language_reading_close_eyes": ["读字", "闭眼"],
-                        "language_3step_action": ["动作", "指令", "步骤"],
-                    }
-                    
                     # 从 topic 中提取（topic 格式可能是 "吃饭→算术" 或 "算术"）
                     topic_text = topic.split("→")[-1].strip() if "→" in topic else topic.strip()
-                    
-                    mapped_task = None
-                    for task_id in undone_tasks:
-                        keywords = _TOPIC_TASK_KEYWORDS.get(task_id, [])
-                        if any(kw in topic_text for kw in keywords):
-                            mapped_task = task_id
-                            print(f"[AgentFC-Background] ⚡ 关键词命中：'{topic_text}' -> {task_id}")
-                            break
-                    
-                    if mapped_task:
-                        # 关键词直接命中，无需 LLM
-                        self._precomputed_next_task = mapped_task
-                        self._consecutive_buffer_count = 0  # 重置计数器
-                        print(f"[AgentFC-Background] 🎯 Topic映射完成（关键词）: {mapped_task}")
-                    else:
-                        # 关键词未命中，使用 LLM 判断
-                        from src.llm.http_client_pool import get_siliconflow_chat_openai
-                        background_model = os.getenv(
-                            "BACKGROUND_ANALYSIS_MODEL",
-                            os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-                        )
-                        llm = get_siliconflow_chat_openai(
-                            model=background_model,
-                            temperature=0.3,
-                            timeout=10,
-                            max_retries=1,
-                        )
-                        
-                        prompt_topic = f"""当前对话正过渡到话题：「{topic_text}」。
+
+                    # 全量使用 LLM 判断话题映射，不走关键词优先
+                    from src.llm.http_client_pool import get_siliconflow_chat_openai
+                    background_model = os.getenv(
+                        "BACKGROUND_ANALYSIS_MODEL",
+                        os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+                    )
+                    llm = get_siliconflow_chat_openai(
+                        model=background_model,
+                        temperature=0.3,
+                        timeout=10,
+                        max_retries=1,
+                    )
+
+                    prompt_topic = f"""当前对话正过渡到话题：「{topic_text}」。
 请判断这个话题是否直接对应以下待完成任务之一：
 {', '.join(undone_tasks)}
 
 如果对应，输出任务ID。
 否则输出 None。
 只输出结果，不要解释。"""
-                        res = await llm.ainvoke([{"role": "user", "content": prompt_topic}])
-                        res_content = res.content.strip()
-                        
-                        if res_content in undone_tasks:
-                            print(f"[AgentFC-Background] 🎯 Topic命中（LLM）：'{topic_text}' -> {res_content}")
-                            self._precomputed_next_task = res_content
-                            self._consecutive_buffer_count = 0  # 重置计数器
-                        else:
-                            print(f"[AgentFC-Background] ℹ️ Topic未命中任何任务: '{topic_text}' -> '{res_content}'")
+                    res = await llm.ainvoke([{"role": "user", "content": prompt_topic}])
+                    res_content = res.content.strip()
+
+                    if res_content in undone_tasks:
+                        print(f"[AgentFC-Background] 🎯 Topic命中（LLM）：'{topic_text}' -> {res_content}")
+                        self._precomputed_next_task = res_content
+                        self._consecutive_buffer_count = 0  # 重置计数器
+                    else:
+                        print(f"[AgentFC-Background] ℹ️ Topic未命中任何任务: '{topic_text}' -> '{res_content}'")
                             
             except Exception as e:
                 print(f"[AgentFC-Background] ⚠️ Topic映射失败: {e}")
