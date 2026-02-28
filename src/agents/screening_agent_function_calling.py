@@ -1051,9 +1051,11 @@ class ADScreeningAgentFunctionCalling:
                         patient_emotion=current_emotion
                     )
             
-            # 🆕 只对普通问题做去重检查，同意请求不需要检查
+            # 🆕 去重仅用于缓冲闲聊任务；评估任务题目不能被替换为闲聊
             if next_question and effective_task_id_for_last != "buffer_consent":
-                next_question = self._ensure_question_not_repeated(next_question, patient_profile, chat_history)
+                next_question = self._ensure_question_not_repeated(
+                    next_question, patient_profile, chat_history, task_id=effective_task_id_for_last
+                )
 
             # 🆕 更新 _last_task_id
             self._last_task_id = effective_task_id_for_last
@@ -1454,8 +1456,13 @@ class ADScreeningAgentFunctionCalling:
             return True
         return False
 
-    def _ensure_question_not_repeated(self, question: str, patient_profile: Dict, chat_history: List) -> str:
+    def _ensure_question_not_repeated(
+        self, question: str, patient_profile: Dict, chat_history: List, task_id: Optional[str] = None
+    ) -> str:
         if not question:
+            return question
+        # 非 buffer 任务（评估题）允许重复提问，不做“改问闲聊”替换
+        if task_id and task_id not in self.BUFFER_TASKS:
             return question
         for prev in self._asked_questions[-12:]:
             if self._is_similar_text(question, prev):
