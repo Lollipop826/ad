@@ -353,6 +353,58 @@ class QuestionGenerationTool(BaseTool):
             print(f"[QuestionGenTool] ⚠️ 二次改写失败，保留原句: {e}")
 
         return utterance
+
+    def _parse_json_payload(self, raw_output: str) -> Optional[dict]:
+        """尽量从模型输出中提取并解析 JSON 对象。"""
+        import re
+        import ast
+
+        text = (raw_output or "").strip()
+        if not text:
+            return None
+
+        # 去掉 markdown 代码块包裹
+        if "```" in text:
+            text = re.sub(r"```json?\s*", "", text)
+            text = text.replace("```", "").strip()
+
+        candidates: List[str] = [text]
+
+        # 尝试截取最外层 JSON 对象
+        left = text.find("{")
+        right = text.rfind("}")
+        if left != -1 and right != -1 and right > left:
+            candidates.append(text[left:right + 1])
+
+        # 去重并尝试解析
+        seen = set()
+        for cand in candidates:
+            if not cand or cand in seen:
+                continue
+            seen.add(cand)
+
+            normalized_variants = [
+                cand,
+                re.sub(r",\s*([}\]])", r"\1", cand),  # 修复尾逗号
+            ]
+
+            for variant in normalized_variants:
+                try:
+                    parsed = json.loads(variant)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
+
+                # 兼容 python 字典风格（单引号）
+                try:
+                    parsed = ast.literal_eval(variant)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
+
+        return None
     
     def _run(
         self,
@@ -596,11 +648,10 @@ class QuestionGenerationTool(BaseTool):
             if "```" in cleaned_output:
                 cleaned_output = re.sub(r"```json?\s*", "", cleaned_output)
                 cleaned_output = cleaned_output.replace("```", "").strip()
-            
-            # 尝试解析 JSON
-            try:
-                # 尝试直接解析
-                parsed = json_module.loads(cleaned_output)
+
+            # 尝试解析 JSON（容错）
+            parsed = self._parse_json_payload(cleaned_output)
+            if parsed is not None:
                 topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
                 utterance = (parsed.get("utterance") or parsed.get("reply") or "").strip()
 
@@ -643,25 +694,37 @@ class QuestionGenerationTool(BaseTool):
                         question = q
                     elif ack:
                         question = ack
-                    
-            except json_module.JSONDecodeError:
+            else:
                 print(f"[QuestionGenTool] ⚠️ JSON解析失败，尝试提取...")
                 # 优先提取 utterance
-                utterance_match = re.search(r'"utterance"\s*:\s*"([^"]*)"', cleaned_output)
+                utterance_match = re.search(r'"utterance"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned_output, re.DOTALL)
                 if utterance_match:
                     topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
-                    utterance = utterance_match.group(1).strip()
+                    utterance_raw = utterance_match.group(1).strip()
+                    try:
+                        utterance = json_module.loads(f"\"{utterance_raw}\"")
+                    except Exception:
+                        utterance = utterance_raw.replace('\\"', '"')
+                    utterance = utterance.strip()
                     utterance = self._rewrite_utterance_if_needed(utterance, topic_hint, dimension_name)
                     print(f"[QuestionGenTool] ✅ 正则提取成功: utterance='{utterance[:40]}...'")
                     question = utterance
                 else:
                     # 尝试旧协议：ack + q
-                    ack_match = re.search(r'"ack"\s*:\s*"([^"]*)"', cleaned_output)
-                    q_match = re.search(r'"q"\s*:\s*"([^"]*)"', cleaned_output)
+                    ack_match = re.search(r'"ack"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned_output, re.DOTALL)
+                    q_match = re.search(r'"q"\s*:\s*"((?:\\.|[^"\\])*)"', cleaned_output, re.DOTALL)
                     
                     if ack_match and q_match:
                         raw_ack = ack_match.group(1).strip()
                         q = q_match.group(1).strip()
+                        try:
+                            raw_ack = json_module.loads(f"\"{raw_ack}\"")
+                        except Exception:
+                            raw_ack = raw_ack.replace('\\"', '"')
+                        try:
+                            q = json_module.loads(f"\"{q}\"")
+                        except Exception:
+                            q = q.replace('\\"', '"')
                         q = self._keep_single_question(q)
                         topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
                         if self._is_too_open_ended(q):
