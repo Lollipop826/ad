@@ -118,6 +118,7 @@ class ADScreeningAgentFunctionCalling:
         self._pending_consent_task_id: Optional[str] = None
         self._consent_granted_task_id: Optional[str] = None
         self._task_cooldown_until: Dict[str, int] = {}
+        self._last_forced_task_id: Optional[str] = None
         self._last_generated_question: str = "请开始评估"  # 🔥 保存上一次生成的问题
         
         # 🔥 异步问题分类相关
@@ -1362,6 +1363,7 @@ class ADScreeningAgentFunctionCalling:
         self._pending_consent_task_id = None
         self._consent_granted_task_id = None
         self._task_cooldown_until = {}
+        self._last_forced_task_id = None
         self.session_data['memory_words'] = None
         self.session_data['calculation_config'] = None
         self.dimension_index = 0
@@ -1741,6 +1743,20 @@ class ADScreeningAgentFunctionCalling:
             if task_id != "buffer_chat":
                 non_buffer_candidates.append(task_id)
 
+        # 若可选任务足够，避免连续强制选到同一任务（提高多样性）
+        filtered_forced_candidates = list(non_buffer_candidates)
+        if len(filtered_forced_candidates) > 1:
+            blocked = set()
+            if self._last_task_id in filtered_forced_candidates:
+                blocked.add(self._last_task_id)
+            if self._last_forced_task_id in filtered_forced_candidates:
+                blocked.add(self._last_forced_task_id)
+            # 至少保留一个候选
+            if blocked and len(filtered_forced_candidates) - len(blocked) >= 1:
+                filtered_forced_candidates = [
+                    t for t in filtered_forced_candidates if t not in blocked
+                ]
+
         # 获取最近对话
         recent_chat = ""
         if hasattr(self, 'session_data') and self.session_data.get('chat_history'):
@@ -1760,7 +1776,7 @@ class ADScreeningAgentFunctionCalling:
 现在需要从下面的任务列表中选择一个最合适的任务。
 
 【候选任务】（必须选择其中一个）
-{chr(10).join([f"- {tid}: {task_descriptions.get(tid, tid)}" for tid in non_buffer_candidates])}
+{chr(10).join([f"- {tid}: {task_descriptions.get(tid, tid)}" for tid in filtered_forced_candidates])}
 
 【输出格式】严格输出 JSON：
 {{
@@ -1802,10 +1818,11 @@ class ADScreeningAgentFunctionCalling:
                 from_topic = data.get("from_topic", "").strip()
                 to_topic = data.get("to_topic", "").strip()
                 
-                if selected in non_buffer_candidates:
+                if selected in filtered_forced_candidates:
                     self._consecutive_buffer_count = 0  # 重置计数器
                     self._last_bridge_hint = f"{from_topic}→{to_topic}" if from_topic else to_topic
                     self._current_turn_topic_set = True  # 🔥 标记本轮 Step1 已运行
+                    self._last_forced_task_id = selected
                     print(f"[TaskPool] ✅ 强制选择任务: {selected}")
                     return selected
             except Exception as e:
@@ -1813,7 +1830,8 @@ class ADScreeningAgentFunctionCalling:
             
             # 兜底：随机选一个非闲聊任务
             self._consecutive_buffer_count = 0
-            selected = random.choice(non_buffer_candidates)
+            selected = random.choice(filtered_forced_candidates or non_buffer_candidates)
+            self._last_forced_task_id = selected
             print(f"[TaskPool] 🎲 兜底选择: {selected}")
             return selected
         
@@ -1882,8 +1900,9 @@ class ADScreeningAgentFunctionCalling:
             # 直接返回 buffer_chat，让 QuestionGen 根据 bridge_hint 生成自然对话
             # 后台线程会并行检查这个 bridge_hint 是否属于某个 Task
             if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
-                selected = random.choice(non_buffer_candidates)
+                selected = random.choice(filtered_forced_candidates or non_buffer_candidates)
                 self._consecutive_buffer_count = 0
+                self._last_forced_task_id = selected
                 print(f"[TaskPool] ⚠️ buffer 上限触发，兜底切到任务: {selected}")
                 return selected
 
@@ -1894,8 +1913,9 @@ class ADScreeningAgentFunctionCalling:
             print(f"[TaskPool] ⚠️ 第一步选择失败: {e}")
             # 兜底：达到上限时优先返回非 buffer 任务，避免连续闲聊过多
             if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
-                selected = random.choice(non_buffer_candidates)
+                selected = random.choice(filtered_forced_candidates or non_buffer_candidates)
                 self._consecutive_buffer_count = 0
+                self._last_forced_task_id = selected
                 print(f"[TaskPool] 🎲 失败兜底切任务: {selected}")
                 return selected
             return "buffer_chat"
@@ -2756,7 +2776,10 @@ class ADScreeningAgentFunctionCalling:
                                     dimension_id=dim_id,
                                     score=max_points,
                                     max_score=max_points,
-                                    action="update"
+                                    question="(后台全局扫描)",
+                                    answer="(历史对话隐式包含)",
+                                    evaluation_detail=f"后台自动补记分: {done_task}",
+                                    action="save"
                                 )
                                 print(f"[AgentFC-Background] 📊 MMSE自动记分: {done_task} (+{max_points}) -> {mmse_res}")
                                 
