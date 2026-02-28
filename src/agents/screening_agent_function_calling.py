@@ -1496,6 +1496,27 @@ class ADScreeningAgentFunctionCalling:
         s = re.sub(r"[\?？!！。．，,、:：;；\"'“”‘’\(\)（）\[\]【】{}]", "", s)
         return s
 
+    def _normalize_topic_label(self, topic: str) -> str:
+        return self._normalize_text(topic or "")
+
+    def _is_recent_bridge_topic(self, topic: str, window: int = 1) -> bool:
+        """检查目标话题是否与最近若干轮过渡话题重复。"""
+        norm = self._normalize_topic_label(topic)
+        if not norm or not self._used_bridge_topics or window <= 0:
+            return False
+        recent = self._used_bridge_topics[-window:]
+        recent_norm = [self._normalize_topic_label(t) for t in recent]
+        return norm in recent_norm
+
+    def _remember_bridge_topic(self, topic: str) -> None:
+        """记录本轮过渡目标话题（用于后续去重）。"""
+        t = (topic or "").strip()
+        if not t:
+            return
+        self._used_bridge_topics.append(t)
+        if len(self._used_bridge_topics) > 12:
+            self._used_bridge_topics = self._used_bridge_topics[-12:]
+
     def _is_similar_text(self, a: str, b: str) -> bool:
         na = self._normalize_text(a)
         nb = self._normalize_text(b)
@@ -1738,6 +1759,31 @@ class ADScreeningAgentFunctionCalling:
         import json
         import os
         
+        def _parse_topic_json(content: str) -> tuple[str, str]:
+            cleaned = (content or "").strip()
+            cleaned = re.sub(r'```json\s*|\s*```', '', cleaned)
+            data = json.loads(cleaned)
+            return data.get("from_topic", "").strip(), data.get("to_topic", "").strip()
+
+        def _retry_topic_once(
+            llm_client,
+            base_system: str,
+            repeated_topic: str,
+            recent_chat_text: str,
+        ) -> tuple[str, str]:
+            retry_user = f"""最近对话：
+{recent_chat_text if recent_chat_text else '（刚开始聊天）'}
+
+你刚才给的下一个话题「{repeated_topic}」与上一轮重复。
+请换一个不同的话题（仍需自然衔接），不要再选「{repeated_topic}」。
+只输出JSON。"""
+            retry_resp = llm_client.invoke([
+                {"role": "system", "content": base_system},
+                {"role": "user", "content": retry_user}
+            ])
+            retry_content = retry_resp.content.strip() if hasattr(retry_resp, 'content') else str(retry_resp).strip()
+            return _parse_topic_json(retry_content)
+
         # 初始化连续闲聊计数器
         if not hasattr(self, '_consecutive_buffer_count'):
             self._consecutive_buffer_count = 0
@@ -1835,18 +1881,29 @@ class ADScreeningAgentFunctionCalling:
                     {"role": "user", "content": forced_user_message}
                 ])
                 
-                content = response.content.strip()
-                content = re.sub(r'```json\s*|\s*```', '', content)
-                data = json.loads(content)
+                content = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+                cleaned = re.sub(r'```json\s*|\s*```', '', content)
+                data = json.loads(cleaned)
                 
                 selected = data.get("selected_task_id")
-                from_topic = data.get("from_topic", "").strip()
-                to_topic = data.get("to_topic", "").strip()
+                from_topic, to_topic = data.get("from_topic", "").strip(), data.get("to_topic", "").strip()
+
+                if to_topic and self._is_recent_bridge_topic(to_topic, window=1):
+                    print(f"[TaskPool] 🔁 强制模式话题重复: '{to_topic}'，尝试重选...")
+                    try:
+                        from_topic_retry, to_topic_retry = _retry_topic_once(
+                            llm, forced_system_message, to_topic, recent_chat
+                        )
+                        if to_topic_retry and not self._is_recent_bridge_topic(to_topic_retry, window=1):
+                            from_topic, to_topic = from_topic_retry, to_topic_retry
+                    except Exception as e_retry:
+                        print(f"[TaskPool] ⚠️ 强制模式重选失败: {e_retry}")
                 
                 if selected in filtered_forced_candidates:
                     self._consecutive_buffer_count = 0  # 重置计数器
                     self._last_bridge_hint = f"{from_topic}→{to_topic}" if from_topic else to_topic
                     self._current_turn_topic_set = True  # 🔥 标记本轮 Step1 已运行
+                    self._remember_bridge_topic(to_topic)
                     self._last_forced_task_id = selected
                     print(f"[TaskPool] ✅ 强制选择任务: {selected}")
                     return selected
@@ -1908,18 +1965,24 @@ class ADScreeningAgentFunctionCalling:
             ])
             
             content1 = response1.content.strip() if hasattr(response1, 'content') else str(response1).strip()
-            content1 = re.sub(r'```json\s*|\s*```', '', content1)
-            
-            data1 = json.loads(content1)
-            from_topic = data1.get("from_topic", "").strip()
-            to_topic = data1.get("to_topic", "").strip()
+            from_topic, to_topic = _parse_topic_json(content1)
+
+            if to_topic and self._is_recent_bridge_topic(to_topic, window=1):
+                print(f"[TaskPool] 🔁 话题重复: '{to_topic}'，尝试重选...")
+                try:
+                    from_topic_retry, to_topic_retry = _retry_topic_once(
+                        llm, step1_system, to_topic, recent_chat
+                    )
+                    if to_topic_retry and not self._is_recent_bridge_topic(to_topic_retry, window=1):
+                        from_topic, to_topic = from_topic_retry, to_topic_retry
+                except Exception as e_retry:
+                    print(f"[TaskPool] ⚠️ 话题重选失败: {e_retry}")
             
             # 生成 bridge hint
             bridge_hint = f"{from_topic}→{to_topic}" if from_topic and to_topic else to_topic
             self._last_bridge_hint = bridge_hint
+            self._remember_bridge_topic(to_topic)
             self._current_turn_topic_set = True  # 🔥 标记本轮 Step1 已运行
-            
-            print(f"[TaskPool] 📝 话题过渡: '{bridge_hint}'")
             
             # 🔥 Step 2 已移除（移至后台并行执行）
             # 直接返回 buffer_chat，让 QuestionGen 根据 bridge_hint 生成自然对话
