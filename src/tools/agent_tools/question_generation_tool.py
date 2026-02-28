@@ -276,6 +276,27 @@ class QuestionGenerationTool(BaseTool):
         if dimension_name == "闲聊":
             return "您今天在家是看看电视，还是听听歌呀？"
         return q
+
+    def _rewrite_utterance_if_needed(
+        self, utterance: str, topic_hint: str, dimension_name: str
+    ) -> str:
+        """对一体化 utterance 做轻量质量修正（仅在空泛问法时触发）。"""
+        import re
+        text = (utterance or "").strip()
+        if not text or not self._is_too_open_ended(text):
+            return text
+
+        q_match = re.search(r'([^？?]*[？?])\s*$', text)
+        if not q_match:
+            return self._rewrite_open_question(text, topic_hint, dimension_name)
+
+        q_part = q_match.group(1).strip()
+        prefix = text[:q_match.start(1)].strip()
+        new_q = self._rewrite_open_question(q_part, topic_hint, dimension_name)
+        if prefix:
+            prefix = prefix.rstrip('，。 ')
+            return f"{prefix}。{new_q}"
+        return new_q
     
     def _run(
         self,
@@ -314,18 +335,18 @@ class QuestionGenerationTool(BaseTool):
         system_prompt = (
             "你是对方的晚辈或老邻居，在轻松聊天。\n"
             "你不是AI、不是医生、不是采访者。\n\n"
-            "严格只输出 JSON：{\"ack\":\"...\",\"q\":\"...\"}\n\n"
+            "严格只输出 JSON：{\"utterance\":\"...\"}\n\n"
             "规则：\n"
-            "1) ack 先回应对方刚说的话，再自然过渡到下一个话题；ack 不要问号。\n"
-            "2) q 是下一句要问的问题，必须口语化、具体、可直接回答。\n"
-            "3) 必须执行任务指令；若有 must_include，q 必须包含。\n"
-            "4) 若有 bridge_hint，q 必须直接命中该目标话题。\n"
+            "1) utterance 必须先回应对方刚说的话，再自然过渡到提问。\n"
+            "2) utterance 里必须包含且仅包含一个问题（只问一件事）。\n"
+            "3) 必须执行任务指令；若有 must_include，问题里必须包含。\n"
+            "4) 若有 bridge_hint，问题必须直接命中该目标话题。\n"
             "5) 对认知减退老人，一次只问一件事，优先日常具体问题。\n"
             "6) 避免空泛问法，如“最近有什么新鲜事分享一下”。\n"
             "7) 可用轻量选择式问法（如“您更喜欢A还是B”），但不要连环追问。\n"
-            "8) 不要输出任何解释、前后缀或 Markdown。"
-            "9) ack 必须和对方原话直接相关，禁止“我听着挺好”这类空泛附和。\n"
-            "10) 若对方表达拒绝/低落，ack 先接纳情绪，再轻柔转话题，禁止硬夸赞。"
+            "8) 不要输出任何解释、前后缀或 Markdown。\n"
+            "9) 回应部分必须和对方原话直接相关，禁止“我听着挺好”这类空泛附和。\n"
+            "10) 若对方表达拒绝/低落，先接纳情绪，再轻柔转话题，禁止硬夸赞。"
         )
         
         user_prompt_parts = []
@@ -524,67 +545,84 @@ class QuestionGenerationTool(BaseTool):
             try:
                 # 尝试直接解析
                 parsed = json_module.loads(cleaned_output)
-                raw_ack = parsed.get("ack", "").strip()
-                q = parsed.get("q", "").strip()
-                q = self._keep_single_question(q)
                 topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
-                if self._is_too_open_ended(q):
-                    q = self._rewrite_open_question(q, topic_hint, dimension_name)
-                ack = self._sanitize_ack(raw_ack, q)
-                # 不使用代码兜底 ACK；若去重后为空但 LLM 提供了 ack，保留其清洗版
-                if not ack and raw_ack:
-                    ack = self._sanitize_ack(raw_ack, "")
-                
-                print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
-                
-                # 🆕 校验：ack 不应该过分长（放宽到80字，允许更丰富的回应）
-                if ack and len(ack) > 80:
-                    # 尝试在句号/感叹号处截断，保持语义完整
-                    for i in range(60, len(ack)):
-                        if ack[i] in '。！~':
-                            ack = ack[:i+1]
-                            break
-                    else:
-                        ack = ack[:70]
-                
-                # 拼接 acknowledgment 和 question
-                if ack and q:
-                    # 根据 ack 结尾决定连接符
-                    if ack.endswith(("！", "!", "~", "～", "。", ".")):
-                        question = f"{ack}{q}"
-                    else:
-                        question = f"{ack}，{q}"
-                elif q:
-                    question = q
-                elif ack:
-                    question = ack
-                    
-            except json_module.JSONDecodeError:
-                print(f"[QuestionGenTool] ⚠️ JSON解析失败，尝试提取...")
-                # 尝试用正则提取
-                ack_match = re.search(r'"ack"\s*:\s*"([^"]*)"', cleaned_output)
-                q_match = re.search(r'"q"\s*:\s*"([^"]*)"', cleaned_output)
-                
-                if ack_match and q_match:
-                    raw_ack = ack_match.group(1).strip()
-                    q = q_match.group(1).strip()
+                utterance = (parsed.get("utterance") or parsed.get("reply") or "").strip()
+
+                if utterance:
+                    utterance = self._rewrite_utterance_if_needed(utterance, topic_hint, dimension_name)
+                    question = utterance
+                    print(f"[QuestionGenTool] ✅ JSON解析成功: utterance='{utterance[:40]}...'")
+                else:
+                    # 兼容旧协议：ack + q
+                    raw_ack = parsed.get("ack", "").strip()
+                    q = parsed.get("q", "").strip()
                     q = self._keep_single_question(q)
-                    topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
                     if self._is_too_open_ended(q):
                         q = self._rewrite_open_question(q, topic_hint, dimension_name)
                     ack = self._sanitize_ack(raw_ack, q)
                     # 不使用代码兜底 ACK；若去重后为空但 LLM 提供了 ack，保留其清洗版
                     if not ack and raw_ack:
                         ack = self._sanitize_ack(raw_ack, "")
-                    print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
+                    
+                    print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
+                    
+                    # 🆕 校验：ack 不应该过分长（放宽到80字，允许更丰富的回应）
+                    if ack and len(ack) > 80:
+                        # 尝试在句号/感叹号处截断，保持语义完整
+                        for i in range(60, len(ack)):
+                            if ack[i] in '。！~':
+                                ack = ack[:i+1]
+                                break
+                        else:
+                            ack = ack[:70]
+                    
+                    # 拼接 acknowledgment 和 question
                     if ack and q:
-                        question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
-                    else:
-                        question = q or ack
+                        # 根据 ack 结尾决定连接符
+                        if ack.endswith(("！", "!", "~", "～", "。", ".")):
+                            question = f"{ack}{q}"
+                        else:
+                            question = f"{ack}，{q}"
+                    elif q:
+                        question = q
+                    elif ack:
+                        question = ack
+                    
+            except json_module.JSONDecodeError:
+                print(f"[QuestionGenTool] ⚠️ JSON解析失败，尝试提取...")
+                # 优先提取 utterance
+                utterance_match = re.search(r'"utterance"\s*:\s*"([^"]*)"', cleaned_output)
+                if utterance_match:
+                    topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
+                    utterance = utterance_match.group(1).strip()
+                    utterance = self._rewrite_utterance_if_needed(utterance, topic_hint, dimension_name)
+                    print(f"[QuestionGenTool] ✅ 正则提取成功: utterance='{utterance[:40]}...'")
+                    question = utterance
                 else:
-                    # JSON 完全失败，回退到原始输出
-                    print(f"[QuestionGenTool] ⚠️ 回退到原始输出")
-                    question = raw_output.strip().strip('"').strip("'")
+                    # 尝试旧协议：ack + q
+                    ack_match = re.search(r'"ack"\s*:\s*"([^"]*)"', cleaned_output)
+                    q_match = re.search(r'"q"\s*:\s*"([^"]*)"', cleaned_output)
+                    
+                    if ack_match and q_match:
+                        raw_ack = ack_match.group(1).strip()
+                        q = q_match.group(1).strip()
+                        q = self._keep_single_question(q)
+                        topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
+                        if self._is_too_open_ended(q):
+                            q = self._rewrite_open_question(q, topic_hint, dimension_name)
+                        ack = self._sanitize_ack(raw_ack, q)
+                        # 不使用代码兜底 ACK；若去重后为空但 LLM 提供了 ack，保留其清洗版
+                        if not ack and raw_ack:
+                            ack = self._sanitize_ack(raw_ack, "")
+                        print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
+                        if ack and q:
+                            question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
+                        else:
+                            question = q or ack
+                    else:
+                        # JSON 完全失败，回退到原始输出
+                        print(f"[QuestionGenTool] ⚠️ 回退到原始输出")
+                        question = raw_output.strip().strip('"').strip("'")
             
             # 如果还是没有问题，使用回退
             if not question or len(question) < 3:
