@@ -59,8 +59,10 @@ class QuestionGenerationTool(BaseTool):
     args_schema: Type[BaseModel] = QuestionGenerationToolArgs
     
     _llm: ChatOpenAI = PrivateAttr()
+    _balanced_llm: Optional[ChatOpenAI] = PrivateAttr(default=None)
     _fast_llm: Optional[ChatOpenAI] = PrivateAttr(default=None)
     _default_model: str = PrivateAttr(default="Qwen/Qwen2.5-72B-Instruct")
+    _balanced_model: Optional[str] = PrivateAttr(default=None)
     _fast_model: Optional[str] = PrivateAttr(default=None)
     _fast_dimensions: set = PrivateAttr(default_factory=set)
     
@@ -82,6 +84,7 @@ class QuestionGenerationTool(BaseTool):
             return
 
         self._default_model = os.getenv("QUESTION_GEN_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+        self._balanced_model = os.getenv("QUESTION_GEN_BALANCED_MODEL", "Qwen/Qwen2.5-14B-Instruct")
         self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
         try:
@@ -107,6 +110,16 @@ class QuestionGenerationTool(BaseTool):
             timeout=llm_timeout,
         )
 
+        if self._balanced_model and self._balanced_model != self._default_model:
+            self._balanced_llm = get_siliconflow_chat_openai(
+                model=self._balanced_model,
+                temperature=max(0.5, llm_temperature - 0.05),
+                max_tokens=llm_max_tokens,
+                timeout=llm_timeout,
+            )
+        else:
+            self._balanced_llm = None
+
         if self._fast_model and self._fast_model != self._default_model:
             self._fast_llm = get_siliconflow_chat_openai(
                 model=self._fast_model,
@@ -118,14 +131,31 @@ class QuestionGenerationTool(BaseTool):
             self._fast_llm = None
 
         fast_model_info = self._fast_model if self._fast_llm else "disabled"
+        balanced_model_info = self._balanced_model if self._balanced_llm else "disabled"
         print(
             f"[QuestionGenTool] 🚀 主模型={self._default_model} | "
+            f"平衡模型={balanced_model_info} | "
             f"快速模型={fast_model_info} | 快速维度={sorted(self._fast_dimensions)}"
         )
 
-    def _select_llm(self, dimension_name: str) -> tuple[ChatOpenAI, str]:
-        """按维度选择模型：核心评估走质量模型，闲聊走快速模型。"""
+    def _should_use_balanced_model(self, task_instruction: Optional[str], last_user_msg: Optional[str]) -> bool:
+        text = f"{task_instruction or ''} {last_user_msg or ''}"
+        quality_keywords = [
+            "兴趣爱好", "生活习惯", "家庭", "孩子", "学校", "回忆",
+            "不想回答", "不想说", "不做", "别问", "拒绝", "不愿意",
+        ]
+        return any(k in text for k in quality_keywords)
+
+    def _select_llm(
+        self,
+        dimension_name: str,
+        task_instruction: Optional[str] = None,
+        last_user_msg: Optional[str] = None,
+    ) -> tuple[ChatOpenAI, str]:
+        """按轮次复杂度选择模型：高风险语义用平衡模型，普通闲聊用快速模型。"""
         normalized_dimension = (dimension_name or "").strip()
+        if self._balanced_llm and self._should_use_balanced_model(task_instruction, last_user_msg):
+            return self._balanced_llm, self._balanced_model or self._default_model
         if self._fast_llm and normalized_dimension in self._fast_dimensions:
             return self._fast_llm, self._fast_model or self._default_model
         return self._llm, self._default_model
@@ -214,12 +244,15 @@ class QuestionGenerationTool(BaseTool):
         import re
 
         snippet = ""
+        refusal_markers = ["不想回答", "不回答", "不想说", "不说了", "不想做", "别问了", "不聊了"]
         if user_answer:
             candidate = re.split(r"[，。！？?]", user_answer.strip())[0].strip()
-            if 3 <= len(candidate) <= 18:
+            if 3 <= len(candidate) <= 18 and not any(m in candidate for m in refusal_markers):
                 snippet = candidate
 
-        if snippet:
+        if user_answer and any(m in user_answer for m in refusal_markers):
+            base = "没关系，不想回答也行，咱们慢慢聊。"
+        elif snippet:
             base = f"您刚说{snippet}，我听着挺好。"
         else:
             base = "听您这么说我也挺高兴的。"
@@ -472,9 +505,13 @@ class QuestionGenerationTool(BaseTool):
         user_prompt = "\n".join(user_prompt_parts)
         
         try:
-            active_llm, active_model = self._select_llm(dimension_name)
+            active_llm, active_model = self._select_llm(
+                dimension_name,
+                task_instruction=task_instruction,
+                last_user_msg=last_user_msg,
+            )
             if active_model != self._default_model:
-                print(f"[QuestionGenTool] ⚡ 快速模型路径: {active_model} (维度={dimension_name})")
+                print(f"[QuestionGenTool] ⚡ 非主模型路径: {active_model} (维度={dimension_name})")
 
             messages = [
                 {"role": "system", "content": system_prompt},

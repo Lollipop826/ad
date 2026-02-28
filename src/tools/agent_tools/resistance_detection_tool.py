@@ -20,6 +20,7 @@ from typing import Optional, Type, ClassVar, List, Dict
 import os
 import json
 import time
+import re
 
 from pydantic import BaseModel, Field, PrivateAttr
 from langchain.tools import BaseTool
@@ -255,6 +256,48 @@ class ResistanceDetectionTool(BaseTool):
         except Exception as e:
             print(f"[ResistanceTool] ❌ LLM预测失败: {e}")
             return None
+
+    def _quick_rule_predict(self, question: str, answer: str) -> Optional[Dict]:
+        """
+        规则优先拦截：
+        1) 请求重复（最高优先级）
+        2) 明确拒答/拒测（直接视为抵抗）
+        """
+        text = (answer or "").strip()
+        if not text:
+            return None
+
+        norm = re.sub(r"\s+", "", text)
+
+        repeat_patterns = [
+            r"没听清", r"再说一遍", r"重复(一遍|一下)?", r"什么意思",
+            r"你说什么", r"你刚才说什么", r"说啥", r"听不清", r"没听明白", r"没听懂"
+        ]
+        if any(re.search(p, norm) for p in repeat_patterns):
+            return {
+                "label": 4,
+                "label_name": LABEL_NAMES[4],
+                "label_zh": LABEL_ZH[4],
+                "confidence": 0.98,
+                "inference_time_ms": 0.0,
+                "method": "rule",
+            }
+
+        refusal_patterns = [
+            r"不想回答", r"不回答", r"不想说", r"不说(了)?", r"不想做", r"不做(了|这个)?",
+            r"别问(了)?", r"不聊(了)?", r"拒绝", r"不愿意", r"不配合", r"不想测", r"不测了"
+        ]
+        if any(re.search(p, norm) for p in refusal_patterns):
+            return {
+                "label": 3,  # 直接触发抵抗流程
+                "label_name": LABEL_NAMES[3],
+                "label_zh": "明确拒绝",
+                "confidence": 0.95,
+                "inference_time_ms": 0.0,
+                "method": "rule",
+            }
+
+        return None
     
     def _run(self, question: str = "", answer: str = "", language: str = "zh", **kwargs) -> str:
         """执行抵抗情绪检测"""
@@ -288,8 +331,10 @@ class ResistanceDetectionTool(BaseTool):
                 "method": "none"
             }, ensure_ascii=False)
         
-        # 直接调用 LLM
-        result = self._llm_predict(question, answer)
+        # 规则优先，避免明显拒答被 LLM 误判成“小抱怨”
+        result = self._quick_rule_predict(question, answer)
+        if result is None:
+            result = self._llm_predict(question, answer)
         
         if result is None:
             # 兜底
@@ -317,14 +362,14 @@ class ResistanceDetectionTool(BaseTool):
             confidence=result["confidence"],
             rationale=LABEL_DESC[pred_label],
             inference_time_ms=result.get("inference_time_ms", 0),
-            method="llm"
+            method=result.get("method", "llm")
         )
         
         status = "抵抗" if is_resistant else "正常"
         logger.end(
             结果=f"{status}/{result['label_zh']}",
             置信度=f"{result['confidence']:.2%}",
-            方法="llm"
+            方法=result.get("method", "llm")
         )
         
         return json.dumps(output.model_dump(), ensure_ascii=False)
