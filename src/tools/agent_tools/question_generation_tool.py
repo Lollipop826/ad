@@ -59,6 +59,10 @@ class QuestionGenerationTool(BaseTool):
     args_schema: Type[BaseModel] = QuestionGenerationToolArgs
     
     _llm: ChatOpenAI = PrivateAttr()
+    _fast_llm: Optional[ChatOpenAI] = PrivateAttr(default=None)
+    _default_model: str = PrivateAttr(default="Qwen/Qwen2.5-72B-Instruct")
+    _fast_model: Optional[str] = PrivateAttr(default=None)
+    _fast_dimensions: set = PrivateAttr(default_factory=set)
     
     def __init__(
         self,
@@ -67,15 +71,64 @@ class QuestionGenerationTool(BaseTool):
         **kwargs
     ):
         super().__init__(**kwargs)
-        
-        # 🔥 共享 ChatOpenAI + 共享 httpx 连接池（sync/async）
-        print("[QuestionGenTool] 🚀 复用共享 ChatOpenAI（Qwen2.5-72B）")
+
+        if llm_instance is not None:
+            self._llm = llm_instance
+            self._fast_llm = None
+            self._default_model = "custom_llm_instance"
+            self._fast_model = None
+            self._fast_dimensions = set()
+            print("[QuestionGenTool] 🚀 使用外部注入 LLM 实例")
+            return
+
+        self._default_model = os.getenv("QUESTION_GEN_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+        self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+
+        try:
+            llm_temperature = float(os.getenv("QUESTION_GEN_TEMPERATURE", "0.7"))
+        except ValueError:
+            llm_temperature = 0.7
+        try:
+            llm_max_tokens = int(os.getenv("QUESTION_GEN_MAX_TOKENS", "160"))
+        except ValueError:
+            llm_max_tokens = 160
+        try:
+            llm_timeout = float(os.getenv("QUESTION_GEN_TIMEOUT", "20"))
+        except ValueError:
+            llm_timeout = 20.0
+
+        fast_dims_raw = os.getenv("QUESTION_GEN_FAST_DIMENSIONS", "闲聊")
+        self._fast_dimensions = {d.strip() for d in fast_dims_raw.split(",") if d.strip()}
+
         self._llm = get_siliconflow_chat_openai(
-            model="Qwen/Qwen2.5-72B-Instruct",
-            temperature=0.7,
-            max_tokens=200,
-            timeout=30,
+            model=self._default_model,
+            temperature=llm_temperature,
+            max_tokens=llm_max_tokens,
+            timeout=llm_timeout,
         )
+
+        if self._fast_model and self._fast_model != self._default_model:
+            self._fast_llm = get_siliconflow_chat_openai(
+                model=self._fast_model,
+                temperature=max(0.3, llm_temperature - 0.1),
+                max_tokens=llm_max_tokens,
+                timeout=llm_timeout,
+            )
+        else:
+            self._fast_llm = None
+
+        fast_model_info = self._fast_model if self._fast_llm else "disabled"
+        print(
+            f"[QuestionGenTool] 🚀 主模型={self._default_model} | "
+            f"快速模型={fast_model_info} | 快速维度={sorted(self._fast_dimensions)}"
+        )
+
+    def _select_llm(self, dimension_name: str) -> tuple[ChatOpenAI, str]:
+        """按维度选择模型：核心评估走质量模型，闲聊走快速模型。"""
+        normalized_dimension = (dimension_name or "").strip()
+        if self._fast_llm and normalized_dimension in self._fast_dimensions:
+            return self._fast_llm, self._fast_model or self._default_model
+        return self._llm, self._default_model
     
     def _run(
         self,
@@ -271,10 +324,25 @@ class QuestionGenerationTool(BaseTool):
         user_prompt = "\n".join(user_prompt_parts)
         
         try:
-            response = self._llm.invoke([
+            active_llm, active_model = self._select_llm(dimension_name)
+            if active_model != self._default_model:
+                print(f"[QuestionGenTool] ⚡ 快速模型路径: {active_model} (维度={dimension_name})")
+
+            messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
-            ])
+            ]
+
+            try:
+                response = active_llm.invoke(messages)
+            except Exception as invoke_error:
+                # 主模型失败时回退到快速模型，避免一次失败拖慢整轮对话
+                if active_llm is self._llm and self._fast_llm is not None:
+                    print(f"[QuestionGenTool] ⚠️ 主模型调用失败，回退快速模型: {invoke_error}")
+                    active_model = self._fast_model or self._default_model
+                    response = self._fast_llm.invoke(messages)
+                else:
+                    raise
             
             # 兼容处理：本地模型返回str，ChatOpenAI返回AIMessage
             if hasattr(response, "content"):
@@ -490,7 +558,11 @@ class QuestionGenerationTool(BaseTool):
 
 请生成一个自然的过渡回应（先具体回应对方说的"{user_answer}"，再自然过渡到"{dimension_name}"）："""
             
-            response = self._llm.invoke([
+            transition_llm, transition_model = self._select_llm(dimension_name)
+            if transition_model != self._default_model:
+                print(f"[QuestionGenTool] ⚡ 自然过渡使用快速模型: {transition_model}")
+
+            response = transition_llm.invoke([
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ])

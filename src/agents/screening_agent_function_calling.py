@@ -2546,8 +2546,12 @@ class ADScreeningAgentFunctionCalling:
                     else:
                         # 关键词未命中，使用 LLM 判断
                         from src.llm.http_client_pool import get_siliconflow_chat_openai
+                        background_model = os.getenv(
+                            "BACKGROUND_ANALYSIS_MODEL",
+                            os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+                        )
                         llm = get_siliconflow_chat_openai(
-                            model="Qwen/Qwen2.5-72B-Instruct",
+                            model=background_model,
                             temperature=0.3,
                             timeout=10,
                             max_retries=1,
@@ -2596,8 +2600,12 @@ class ADScreeningAgentFunctionCalling:
 {history_text}
 """
             from src.llm.http_client_pool import get_siliconflow_chat_openai
+            background_model = os.getenv(
+                "BACKGROUND_ANALYSIS_MODEL",
+                os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+            )
             global_llm = get_siliconflow_chat_openai(
-                model="Qwen/Qwen2.5-72B-Instruct",
+                model=background_model,
                 temperature=0.3,
                 timeout=10,
                 max_retries=1,
