@@ -1552,6 +1552,46 @@ class ADScreeningAgentFunctionCalling:
                 return self._fallback_followup_question(patient_profile, chat_history)
         return question
 
+    def _extract_last_assistant_question(self, chat_history: List[Dict]) -> str:
+        if not chat_history:
+            return ""
+        for msg in reversed(chat_history):
+            if msg.get('role') == 'assistant':
+                content = (msg.get('content') or '').strip()
+                if content:
+                    return content
+        return ""
+
+    def _question_focus(self, text: str) -> str:
+        """提取问句核心，便于判断“同语义复问”"""
+        import re
+        t = (text or "").strip().replace("?", "？")
+        if not t:
+            return ""
+        m = re.search(r'([^？]*？)\s*$', t)
+        q = m.group(1) if m else t
+        return self._normalize_text(q)
+
+    def _is_repetitive_buffer_question(self, new_question: str, chat_history: List[Dict]) -> bool:
+        """检测 buffer 问题是否与上一轮问题语义过近。"""
+        from difflib import SequenceMatcher
+
+        prev_question = self._extract_last_assistant_question(chat_history)
+        if not prev_question:
+            return False
+
+        if self._is_similar_text(new_question, prev_question):
+            return True
+
+        focus_new = self._question_focus(new_question)
+        focus_prev = self._question_focus(prev_question)
+        if focus_new and focus_prev:
+            ratio = SequenceMatcher(None, focus_new, focus_prev).ratio()
+            if ratio >= 0.62:
+                print(f"[AgentFC] ⚠️ 检测到同语义复问 (focus_ratio={ratio:.2f})")
+                return True
+        return False
+
     def _fallback_followup_question(self, patient_profile: Dict, chat_history: List) -> str:
         patient_name = patient_profile.get('name', '')
         greeting = f"{patient_name}，" if patient_name else ""
@@ -2120,7 +2160,37 @@ class ADScreeningAgentFunctionCalling:
         try:
             result = json.loads(result_json)
             if result.get('success') and result.get('question'):
-                return result['question']
+                question = result['question']
+                # 防抖：若与上一轮同语义复问，强制换角度重生成一次
+                if self._is_repetitive_buffer_question(question, chat_history):
+                    print("[AgentFC] 🔁 buffer问题与上一轮过近，触发二次改写")
+                    last_ai_q = self._extract_last_assistant_question(chat_history)
+                    retry_hint = (
+                        f"{hint}\n"
+                        "【强约束】禁止复问上一轮同类问题，必须换一个不同角度继续聊。"
+                        f"上一轮问题：{last_ai_q}"
+                    )
+                    retry_json = self.question_tool._run(
+                        dimension_name="闲聊",
+                        dimension_description=retry_hint,
+                        patient_name=patient_profile.get('name'),
+                        patient_gender=patient_profile.get('gender'),
+                        patient_age=patient_profile.get('age'),
+                        conversation_history=recent_history,
+                        task_instruction=retry_hint,
+                        avoid_questions=self._asked_questions + [last_ai_q],
+                        bridge_hint=bridge_hint,
+                    )
+                    try:
+                        retry_result = json.loads(retry_json)
+                        retry_q = retry_result.get('question', '').strip() if retry_result.get('success') else ''
+                        if retry_q and not self._is_repetitive_buffer_question(retry_q, chat_history):
+                            return retry_q
+                    except Exception:
+                        pass
+                    # 二次仍重复则兜底换题，避免连问
+                    return self._fallback_followup_question(patient_profile, chat_history)
+                return question
         except:
             pass
         
