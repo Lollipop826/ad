@@ -1330,6 +1330,14 @@ class ADScreeningAgentFunctionCalling:
         self.current_dimension = MMSE_DIMENSIONS[0]
         self.consecutive_failures = 0
 
+    def _get_max_consecutive_buffer_chat(self) -> int:
+        """读取连续 buffer 上限，默认 1（最多连续一轮闲聊）。"""
+        try:
+            limit = int(os.getenv("MAX_CONSECUTIVE_BUFFER_CHAT", "1"))
+        except ValueError:
+            limit = 1
+        return max(0, limit)
+
     def _select_next_task(self) -> Optional[str]:
         """
         任务池调度：选择下一个要执行的任务
@@ -1397,12 +1405,13 @@ class ADScreeningAgentFunctionCalling:
         # 🔥 初始化连续闲聊计数器（如果不存在）
         if not hasattr(self, '_consecutive_buffer_count'):
             self._consecutive_buffer_count = 0
+        max_buffer_rounds = self._get_max_consecutive_buffer_chat()
 
         # 认知任务后插入 buffer_chat（但受计数器限制）
         if self._last_task_id and self._is_cognitive_task(self._last_task_id):
             if any(self._is_cognitive_task(t) for t in candidates):
-                # 🔥 检查是否已连续闲聊3次，超过则强制使用 LLM 选择任务
-                if self._consecutive_buffer_count >= 1:
+                # 超过连续闲聊上限后，强制走任务选择
+                if self._consecutive_buffer_count >= max_buffer_rounds:
                     print(f"[TaskPool] ⚠️ 连续闲聊 {self._consecutive_buffer_count} 次，不再插入 buffer")
                     # 继续走 LLM 选择逻辑
                 else:
@@ -1700,7 +1709,8 @@ class ADScreeningAgentFunctionCalling:
                     recent_chat += f"{role}：{content}\n"
 
         # 🛑 保底机制：连续闲聊超过3次，强制选择任务
-        if self._consecutive_buffer_count >= 1 and non_buffer_candidates:
+        max_buffer_rounds = self._get_max_consecutive_buffer_chat()
+        if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
             print(f"[TaskPool] ⚠️ 连续闲聊 {self._consecutive_buffer_count} 次，强制选择任务")
             
             forced_system_message = f"""你是一个对话策略师。
@@ -1828,13 +1838,23 @@ class ADScreeningAgentFunctionCalling:
             # 🔥 Step 2 已移除（移至后台并行执行）
             # 直接返回 buffer_chat，让 QuestionGen 根据 bridge_hint 生成自然对话
             # 后台线程会并行检查这个 bridge_hint 是否属于某个 Task
-            
+            if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
+                selected = random.choice(non_buffer_candidates)
+                self._consecutive_buffer_count = 0
+                print(f"[TaskPool] ⚠️ buffer 上限触发，兜底切到任务: {selected}")
+                return selected
+
             self._consecutive_buffer_count += 1
             return "buffer_chat"
             
         except Exception as e:
             print(f"[TaskPool] ⚠️ 第一步选择失败: {e}")
-            # 兜底
+            # 兜底：达到上限时优先返回非 buffer 任务，避免连续闲聊过多
+            if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
+                selected = random.choice(non_buffer_candidates)
+                self._consecutive_buffer_count = 0
+                print(f"[TaskPool] 🎲 失败兜底切任务: {selected}")
+                return selected
             return "buffer_chat"
 
     def _get_expected_answer_for_task(self, task_id: str, patient_profile: Dict) -> Optional[str]:
@@ -2628,8 +2648,30 @@ class ADScreeningAgentFunctionCalling:
                 hit_tasks = json.loads(content)
             
             if isinstance(hit_tasks, list) and hit_tasks:
-                print(f"[AgentFC-Background] 🌍 全局扫描命中: {hit_tasks}")
-                for done_task in hit_tasks:
+                # 限制每轮最多自动完成 1 个任务，避免误判导致进度跳跃
+                try:
+                    max_auto_done = int(os.getenv("GLOBAL_SCAN_MAX_AUTO_DONE", "1"))
+                except ValueError:
+                    max_auto_done = 1
+                max_auto_done = max(0, max_auto_done)
+
+                unique_hits = []
+                for task in hit_tasks:
+                    if task in undone and task not in unique_hits:
+                        unique_hits.append(task)
+
+                capped_hits = unique_hits[:max_auto_done] if max_auto_done > 0 else []
+                if capped_hits:
+                    print(f"[AgentFC-Background] 🌍 全局扫描命中: {unique_hits}")
+                    if len(unique_hits) > len(capped_hits):
+                        print(
+                            f"[AgentFC-Background] ℹ️ 本轮仅自动完成 {len(capped_hits)} 个任务，"
+                            f"其余延后确认: {unique_hits[len(capped_hits):]}"
+                        )
+                else:
+                    print(f"[AgentFC] 🌊 全局扫描无可自动确认任务")
+
+                for done_task in capped_hits:
                     if done_task in undone:
                         # 标记任务完成
                         self._task_done.add(done_task)

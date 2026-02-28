@@ -129,6 +129,33 @@ class QuestionGenerationTool(BaseTool):
         if self._fast_llm and normalized_dimension in self._fast_dimensions:
             return self._fast_llm, self._fast_model or self._default_model
         return self._llm, self._default_model
+
+    def _looks_like_question(self, text: str) -> bool:
+        t = (text or "").strip()
+        if not t:
+            return False
+        markers = ("吗", "呢", "么", "什么", "怎么", "哪里", "哪个", "多少", "为何", "为啥", "是否")
+        return any(m in t for m in markers) or ("？" in t) or ("?" in t)
+
+    def _keep_single_question(self, text: str) -> str:
+        """压缩为单个主问句，减少“连环双问”带来的冗余。"""
+        import re
+        q = (text or "").strip()
+        if not q:
+            return q
+        q = q.replace("?", "？")
+        segments = [seg.strip("，。；;!！~～ ") for seg in re.split(r"[？]+", q) if seg.strip("，。；;!！~～ ")]
+        if not segments:
+            return ""
+        chosen = segments[0]
+        if len(segments) > 1 and not self._looks_like_question(chosen):
+            for seg in segments[1:]:
+                if self._looks_like_question(seg):
+                    chosen = seg
+                    break
+        if self._looks_like_question(chosen):
+            return f"{chosen}？"
+        return chosen
     
     def _run(
         self,
@@ -371,6 +398,7 @@ class QuestionGenerationTool(BaseTool):
                 parsed = json_module.loads(cleaned_output)
                 ack = parsed.get("ack", "").strip()
                 q = parsed.get("q", "").strip()
+                q = self._keep_single_question(q)
                 
                 print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
                 
@@ -414,6 +442,7 @@ class QuestionGenerationTool(BaseTool):
                 if ack_match and q_match:
                     ack = ack_match.group(1).strip()
                     q = q_match.group(1).strip()
+                    q = self._keep_single_question(q)
                     print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
                     if ack and q:
                         question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
@@ -471,6 +500,8 @@ class QuestionGenerationTool(BaseTool):
         question = re.sub(r"，+", "，", question)  # 多个逗号合并为一个
         question = re.sub(r"。，", "，", question)  # 。，变为，
         question = re.sub(r"，(?=[？?。!！~～])", "", question)  # 逗号后面直接跟标点时删除逗号
+        # 只保留一个主问句，避免“两个连续问句”听感过于密集
+        question = self._keep_single_question(question) if ("？" in question or "?" in question) else question
         
         # 清理问题末尾
         if question and not question.endswith(("？", "?", "。", ".", "！", "!", "~", "～")):
