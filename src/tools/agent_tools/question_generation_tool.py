@@ -202,6 +202,21 @@ class QuestionGenerationTool(BaseTool):
         if a and not a.endswith(("。", "！", "!", "~", "～")):
             a += "。"
         return a
+
+    def _build_ack_fallback(
+        self,
+        patient_name: Optional[str] = None,
+        patient_gender: Optional[str] = None,
+        patient_age: Optional[int] = None,
+    ) -> str:
+        """当 ack 被清空时，补一条简短的非问句回应，保留过渡感。"""
+        if patient_name:
+            if patient_gender == '男':
+                suffix = '爷爷' if (patient_age and patient_age >= 60) else '叔叔'
+            else:
+                suffix = '奶奶' if (patient_age and patient_age >= 60) else '阿姨'
+            return f"{patient_name}{suffix}，听您这么说我也挺高兴的。"
+        return "听您这么说我也挺高兴的。"
     
     def _run(
         self,
@@ -446,6 +461,8 @@ class QuestionGenerationTool(BaseTool):
                 q = parsed.get("q", "").strip()
                 q = self._keep_single_question(q)
                 ack = self._sanitize_ack(ack, q)
+                if not ack and q:
+                    ack = self._build_ack_fallback(patient_name, patient_gender, patient_age)
                 
                 print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
                 
@@ -482,6 +499,8 @@ class QuestionGenerationTool(BaseTool):
                     q = q_match.group(1).strip()
                     q = self._keep_single_question(q)
                     ack = self._sanitize_ack(ack, q)
+                    if not ack and q:
+                        ack = self._build_ack_fallback(patient_name, patient_gender, patient_age)
                     print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
                     if ack and q:
                         question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
