@@ -84,8 +84,8 @@ class QuestionGenerationTool(BaseTool):
             return
 
         self._default_model = os.getenv("QUESTION_GEN_MODEL", "Qwen/Qwen2.5-72B-Instruct")
-        self._balanced_model = os.getenv("QUESTION_GEN_BALANCED_MODEL", "Qwen/Qwen2.5-14B-Instruct")
-        self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+        self._balanced_model = os.getenv("QUESTION_GEN_BALANCED_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+        self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "Qwen/Qwen2.5-14B-Instruct")
 
         try:
             llm_temperature = float(os.getenv("QUESTION_GEN_TEMPERATURE", "0.7"))
