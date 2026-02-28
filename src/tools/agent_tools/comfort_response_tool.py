@@ -169,7 +169,9 @@ class ComfortResponseTool(BaseTool):
             "- 必须口语化，像邻居唠嗑\n"
             "- 必须简短，1-2句话\n"
             "- 禁止说「我能理解您的感受」这种官话\n"
-            "- 禁止说「医疗」「评估」「认知」等专业词\n\n"
+            "- 禁止说「医疗」「评估」「认知」等专业词\n"
+            "- 只能基于患者原话或上下文已出现的信息，不得臆造人物/地点/事件\n"
+            "- 如果上下文没有具体事实，只能用泛化问法（如“您平时喜欢做啥”）\n\n"
             "直接输出回复内容，不要JSON格式。"
         )
     
@@ -245,6 +247,45 @@ class ComfortResponseTool(BaseTool):
             "要不我给您讲个笑话？",
         ],
     }
+
+    def _build_safe_fallback(self, full_honorific: Optional[str], selected_topic: Optional[str]) -> str:
+        """当回复出现臆造细节时，回退到稳健的泛化问法。"""
+        topic_hint = (selected_topic or "").strip()
+        if "天气" in topic_hint:
+            followup = "今天天气还挺合适出门，您平时会不会出去走走？"
+        elif "饮食" in topic_hint:
+            followup = "您平时吃饭最喜欢吃点啥呀？"
+        elif "电视" in topic_hint:
+            followup = "您平时喜欢看什么节目呀？"
+        elif "兴趣" in topic_hint or "爱好" in topic_hint:
+            followup = "您平时最喜欢做点啥呀？"
+        else:
+            followup = "要不聊聊您平时最喜欢做点啥？"
+
+        prefix = f"{full_honorific}，" if full_honorific else ""
+        return f"{prefix}听您这么说我也挺高兴的。{followup}"
+
+    def _has_ungrounded_detail(self, reply: str, source_text: str) -> bool:
+        """
+        检测明显的“凭空细节”。
+        仅做保守拦截：命中高风险短语且上下文未出现对应线索才拦截。
+        """
+        text = reply or ""
+        source = source_text or ""
+        grounded_rules = [
+            ("咱们村", ["村"]),
+            ("村里", ["村"]),
+            ("老槐树", ["槐树", "树"]),
+            ("您家老伴", ["老伴", "爱人"]),
+            ("你家老伴", ["老伴", "爱人"]),
+            ("您儿子", ["儿子", "孩子"]),
+            ("您女儿", ["女儿", "孩子"]),
+            ("您孙子", ["孙子", "孙女"]),
+        ]
+        for phrase, hints in grounded_rules:
+            if phrase in text and not any(h in source for h in hints):
+                return True
+        return False
     
     def _run(
         self,
@@ -302,12 +343,15 @@ class ComfortResponseTool(BaseTool):
         try:
             # 构建上下文描述
             context_desc = ""
+            source_text = patient_answer or ""
             if chat_history and len(chat_history) > 2:
                 recent = chat_history[-6:]
                 context_desc = "【最近聊天上下文】\n"
                 for msg in recent:
                     role = "医生" if msg.get("role") == "assistant" else "患者"
-                    context_desc += f"{role}: {msg.get('content', '')}\n"
+                    content = msg.get('content', '')
+                    context_desc += f"{role}: {content}\n"
+                    source_text += f"\n{content}"
                 context_desc += "\n"
             
             used_topics = used_topics or []
@@ -327,7 +371,9 @@ class ComfortResponseTool(BaseTool):
                 f"🚨 任务：\n"
                 f"1. 先根据上下文选一个轻松话题（避开已用话题：{used_topics_str}）\n"
                 f"2. 按策略安抚情绪，自然过渡到该话题\n"
-                f"3. 话题要适合老年人（饮食、回忆、电视、室内活动）\n\n"
+                f"3. 话题要适合老年人（日常、天气、饮食、电视、兴趣爱好）\n"
+                f"4. 严禁臆造具体经历或场景（例如“咱们村的老槐树”）；"
+                f"如无明确信息，只能问泛化问题\n\n"
                 f"输出格式（严格JSON）：\n"
                 f'{{\"topic\": \"选中的话题\", \"reply\": \"安慰+转场的回复\"}}'
             )
@@ -361,6 +407,9 @@ class ComfortResponseTool(BaseTool):
             # 清理
             comfort_msg = comfort_msg.strip().strip('"').strip("'")
             if comfort_msg.startswith("你回复："): comfort_msg = comfort_msg[4:]
+            if self._has_ungrounded_detail(comfort_msg, source_text):
+                print("[ComfortTool] ⚠️ 检测到潜在臆造细节，回退为稳健问法")
+                comfort_msg = self._build_safe_fallback(full_honorific, selected_topic)
             
             logger.step(f"✅ 选中话题: {selected_topic}")
             

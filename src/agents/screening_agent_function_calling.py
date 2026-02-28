@@ -396,9 +396,14 @@ class ADScreeningAgentFunctionCalling:
                 # 使用原有comfort工具生成闲聊回复
                 # 映射情绪到抵抗类别
                 emotion_to_category = {
-                    'sad': 'fatigue', 'angry': 'hostility', 'fear': 'avoidance'
+                    'sad': 'fatigue',
+                    'angry': 'hostility',
+                    'fear': 'avoidance',
+                    'neutral': 'normal',
+                    'happy': 'normal',
+                    'excited': 'normal',
                 }
-                category = emotion_to_category.get(current_emotion, 'avoidance')
+                category = emotion_to_category.get(current_emotion, 'normal')
                 comfort_result = self.comfort_tool._run(
                     resistance_category=category,
                     patient_answer=user_answer,
@@ -1305,6 +1310,7 @@ class ADScreeningAgentFunctionCalling:
     def _reset_task_pool(self, session_id: str) -> None:
         self._active_session_id = session_id
         self._last_task_id = None
+        self._last_generated_question = "请开始评估"
         self._task_done = set()
         self._task_attempts = {}
         self._task_best = {}
@@ -1312,8 +1318,12 @@ class ADScreeningAgentFunctionCalling:
         self._registration_ts = None
         self._turn_counter = 0
         self._session_start_ts = time.time()
+        self.is_in_comfort_mode = False
+        self.comfort_turn_count = 0
+        self._comfort_interrupted_task_id = None
         self._asked_to_continue = False  # 重置过渡语标记
         self._asked_questions = []  # 重置已问问题列表
+        self._used_chat_topics = []  # 🔥 重置安抚阶段话题记忆
         self._used_bridge_topics = []  # 🔥 重置过渡话题记忆
         self._last_bridge_hint = None  # 🔥 重置当前过渡提示
         self._consecutive_free_chat = 0  # 🔥 重置自由闲聊计数
