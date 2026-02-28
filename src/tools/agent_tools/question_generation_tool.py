@@ -156,6 +156,52 @@ class QuestionGenerationTool(BaseTool):
         if self._looks_like_question(chosen):
             return f"{chosen}？"
         return chosen
+
+    def _normalize_for_similarity(self, text: str) -> str:
+        import re
+        t = (text or "").strip().lower()
+        t = re.sub(r"\s+", "", t)
+        t = re.sub(r"[，。！？、:：;；\"'“”‘’（）()【】\[\]~～\-—]", "", t)
+        return t
+
+    def _sanitize_ack(self, ack: str, q: str = "") -> str:
+        """清理 ack 中残留问句，并避免和 q 语义重复。"""
+        import re
+        from difflib import SequenceMatcher
+
+        a = (ack or "").strip()
+        if not a:
+            return ""
+
+        a = a.replace("?", "？")
+        if "？" in a:
+            a = a.split("？", 1)[0].strip()
+
+        parts = [p.strip("，,。!！~～ ") for p in re.split(r"[。!！~～]", a) if p.strip("，,。!！~～ ")]
+        kept_parts = []
+        for p in parts:
+            if self._looks_like_question(p):
+                break
+            kept_parts.append(p)
+
+        if kept_parts:
+            a = "。".join(kept_parts).strip("，,。 ")
+        elif self._looks_like_question(a):
+            a = ""
+        else:
+            a = a.strip("，,。 ")
+
+        if a and q:
+            na = self._normalize_for_similarity(a)
+            nq = self._normalize_for_similarity(q)
+            if na and nq:
+                ratio = SequenceMatcher(None, na, nq).ratio()
+                if na in nq or nq in na or ratio >= 0.82:
+                    a = ""
+
+        if a and not a.endswith(("。", "！", "!", "~", "～")):
+            a += "。"
+        return a
     
     def _run(
         self,
@@ -399,17 +445,9 @@ class QuestionGenerationTool(BaseTool):
                 ack = parsed.get("ack", "").strip()
                 q = parsed.get("q", "").strip()
                 q = self._keep_single_question(q)
+                ack = self._sanitize_ack(ack, q)
                 
                 print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
-                
-                # 🆕 校验：如果 ack 包含问号，移除问句部分，只保留陈述部分
-                if ack and ("？" in ack or "?" in ack):
-                    # 在问号前截断，只保留陈述部分
-                    ack_parts = re.split(r'[？?]', ack)
-                    ack = ack_parts[0].strip()
-                    # 如果截断后太短，使用简单回应
-                    if len(ack) < 3:
-                        ack = "嗯嗯"
                 
                 # 🆕 校验：ack 不应该过分长（放宽到80字，允许更丰富的回应）
                 if ack and len(ack) > 80:
@@ -443,6 +481,7 @@ class QuestionGenerationTool(BaseTool):
                     ack = ack_match.group(1).strip()
                     q = q_match.group(1).strip()
                     q = self._keep_single_question(q)
+                    ack = self._sanitize_ack(ack, q)
                     print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
                     if ack and q:
                         question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
