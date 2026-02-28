@@ -1282,7 +1282,7 @@
                 updateMMSE(data.data);
 
             } else if (data.type === 'show_image') {
-                showImage(data.image_id || data.url, data.title);
+                showImage(data.url || data.image_url || data.image_id, data.title);
 
             } else if (data.type === 'hide_image') {
                 hideImage();
@@ -1861,7 +1861,38 @@
             });
         }
 
-        function showImage(url, title) {
+        function resolveImageUrl(imageRef) {
+            if (!imageRef) return '';
+
+            const ref = String(imageRef).trim();
+            if (!ref) return '';
+
+            // 已是完整路径/地址
+            if (
+                ref.startsWith('http://') ||
+                ref.startsWith('https://') ||
+                ref.startsWith('data:') ||
+                ref.startsWith('/')
+            ) {
+                return ref;
+            }
+
+            // 按 image_id 映射到静态资源
+            const knownImageIds = new Set(['watch', 'pencil', 'close_eyes', 'pentagons']);
+            if (knownImageIds.has(ref)) {
+                return `/static/mmse_images/${ref}.png`;
+            }
+
+            // 容错：未知 id 也按 png 路径尝试
+            return `/static/mmse_images/${ref}.png`;
+        }
+
+        function showImage(imageRef, title) {
+            const url = resolveImageUrl(imageRef);
+            if (!url) {
+                console.warn('[ImageDisplay] 无有效图片地址:', imageRef);
+                return;
+            }
             document.getElementById('image-modal').style.display = 'flex';
             document.getElementById('display-image').src = url;
             document.getElementById('image-title').textContent = title || "请看图";

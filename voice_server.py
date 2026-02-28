@@ -648,6 +648,46 @@ async def websocket_endpoint(websocket: WebSocket):
 
             with open(history_file, 'w', encoding='utf-8') as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
+
+    async def send_image_display_if_needed(agent_result: dict, source: str = ""):
+        """将 Agent 返回的图片展示指令透传给前端。"""
+        if not isinstance(agent_result, dict):
+            return
+
+        raw_cmd = agent_result.get('image_display')
+        if not raw_cmd:
+            return
+
+        cmd = raw_cmd
+        if isinstance(cmd, str):
+            try:
+                cmd = json.loads(cmd)
+            except Exception as e:
+                print(f"[ImageDisplay] ⚠️ 无法解析图片指令(JSON): {e}, raw={raw_cmd}")
+                return
+
+        if not isinstance(cmd, dict):
+            print(f"[ImageDisplay] ⚠️ 无效图片指令类型: {type(cmd)}")
+            return
+
+        payload = dict(cmd)
+        cmd_type = payload.get('type')
+        if cmd_type not in {"show_image", "hide_image"}:
+            print(f"[ImageDisplay] ⚠️ 忽略未知图片指令: {payload}")
+            return
+
+        # 前端兼容：若仅有 image_id，补全静态资源 URL
+        if cmd_type == "show_image":
+            image_id = payload.get('image_id')
+            if image_id and not payload.get('url'):
+                payload['url'] = f"/static/mmse_images/{image_id}.png"
+
+        if await send_json_safe(websocket, payload):
+            print(
+                f"[ImageDisplay] 📤 已发送到前端"
+                f"{f'({source})' if source else ''}: type={cmd_type}, "
+                f"image_id={payload.get('image_id')}, url={payload.get('url')}"
+            )
     
     # 会话状态
     chat_history = []
@@ -828,6 +868,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     current_emotion=emotion
                 )
                 print(f"[Agent] ✅ Agent 响应耗时: {time.time() - start_agent_time:.2f}s")
+
+                # 📋 若本轮需要展示图片，优先发送给前端
+                await send_image_display_if_needed(result, source="audio")
                 
                 response_text = result.get('output', '请继续')
                 mmse_score = result.get('mmse_score')
@@ -1317,6 +1360,9 @@ async def websocket_endpoint(websocket: WebSocket):
                             patient_profile=patient_profile if patient_profile else {'name': '测试', 'age': 70, 'gender': '女', 'education_years': 6},
                             chat_history=chat_history
                         )
+
+                        # 📋 若本轮需要展示图片，优先发送给前端
+                        await send_image_display_if_needed(result, source="text")
                         
                         response = result.get('output', '请继续')
                         
