@@ -943,6 +943,26 @@ class ADScreeningAgentFunctionCalling:
                         img_data = json.loads(img_result)
                         if img_data.get('success'):
                             image_display_command = img_data.get('display_command')
+                    elif next_task_id == "language_reading_close_eyes":
+                        patient_name = patient_profile.get('name', '')
+                        greeting = f"{patient_name}，" if patient_name else ""
+                        title = "我给您看一句话，您读出来，然后照着做就行。"
+                        next_question = f"{greeting}{title}"
+                        img_result = self.image_tool._run(
+                            image_id='close_eyes',
+                            title="请读一下图片上的文字，并照着做",
+                            action='show'
+                        )
+                        img_data = json.loads(img_result)
+                        if img_data.get('success'):
+                            image_display_command = img_data.get('display_command')
+                    elif next_task_id == "language_3step_action":
+                        patient_name = patient_profile.get('name', '')
+                        greeting = f"{patient_name}，" if patient_name else ""
+                        next_question = (
+                            f"{greeting}那咱们开始：请您先抬起右手，"
+                            "再摸一下左耳朵，最后把手放回腿上。您做完跟我说一声。"
+                        )
                     else:
                         # 🔥 修复：正确判断是否是维度切换
                         # 获取上一个任务的 dimension_id
@@ -1015,7 +1035,13 @@ class ADScreeningAgentFunctionCalling:
                         else:
                             next_question = self._call_question_generation(
                                 dimension_name, "", patient_profile, chat_history, False,
-                                is_dimension_switch=True, needs_encouragement=False, resistance_info=None
+                                is_dimension_switch=True,
+                                needs_encouragement=False,
+                                resistance_info=None,
+                                task_instruction=task_instruction,
+                                persona_hooks=persona_hooks,
+                                must_include=must_include,
+                                patient_emotion=current_emotion
                             )
 
                 elif next_task_id in self.BUFFER_TASKS:
@@ -2288,6 +2314,10 @@ class ADScreeningAgentFunctionCalling:
             return ['几月', '几号', '季节']
         if task_id == 'orientation_place_city_district':
             return ['城市', '区']
+        if task_id == 'language_reading_close_eyes':
+            return ['读', '照着做']
+        if task_id == 'language_3step_action':
+            return ['先', '再', '最后']
         return None
     
     def _check_and_display_image(self, question: str, session_id: str) -> Dict:
