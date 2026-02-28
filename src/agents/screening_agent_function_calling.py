@@ -542,28 +542,28 @@ class ADScreeningAgentFunctionCalling:
                             'is_comfort_mode': True,
                                 'dimension': dimension_name,
                             'dimension_id': 'buffer',
-                            'total_time': 1.0 
+                            'total_time': time.time() - start_time
                         }
-                        
+
                     # 🔥 无抵抗：收集预取的知识检索结果（Phase 3 可直接用）
-                        try:
-                            self._prefetched_retrieval = future_retrieval.result(timeout=5)
-                            print(f"[AgentFC] ⚡ buffer路径: 预取知识检索完成")
-                        except Exception as e:
-                            self._prefetched_retrieval = None
-                            print(f"[AgentFC] ⚠️ buffer路径: 预取检索失败: {e}")
-                        
+                    try:
+                        self._prefetched_retrieval = future_retrieval.result(timeout=5)
+                        print(f"[AgentFC] ⚡ buffer路径: 预取知识检索完成")
+                    except Exception as e:
+                        self._prefetched_retrieval = None
+                        print(f"[AgentFC] ⚠️ buffer路径: 预取检索失败: {e}")
+
                     # 🔥 收集任务选择结果（关键！Phase 2 直接用，省掉 ~2s LLM 调用）
-                        if future_task_select:
-                            self._precomputed_next_task = future_task_select.result()
-                            topic_info = getattr(self, '_last_bridge_hint', 'N/A')
-                            print(f"╔════════════════════════════════════════════════════════════╗")
-                            print(f"║ ⏰ [{time.strftime('%H:%M:%S')}] 🔮 Phase 1 (buffer): Task Pre-Selection              ║")
-                            print(f"╠════════════════════════════════════════════════════════════╣")
-                            print(f"  ✨ 预选任务: {self._precomputed_next_task}")
-                            if topic_info:
-                                print(f"  🌉 话题过渡: {topic_info}")
-                            print(f"╚════════════════════════════════════════════════════════════╝")
+                    if future_task_select:
+                        self._precomputed_next_task = future_task_select.result()
+                        topic_info = getattr(self, '_last_bridge_hint', 'N/A')
+                        print(f"╔════════════════════════════════════════════════════════════╗")
+                        print(f"║ ⏰ [{time.strftime('%H:%M:%S')}] 🔮 Phase 1 (buffer): Task Pre-Selection              ║")
+                        print(f"╠════════════════════════════════════════════════════════════╣")
+                        print(f"  ✨ 预选任务: {self._precomputed_next_task}")
+                        if topic_info:
+                            print(f"  🌉 话题过渡: {topic_info}")
+                        print(f"╚════════════════════════════════════════════════════════════╝")
                     
                     eval_result = {
                         'is_correct': True, 'quality_level': 'good', 'cognitive_performance': '正常',
@@ -1317,6 +1317,10 @@ class ADScreeningAgentFunctionCalling:
         self._used_bridge_topics = []  # 🔥 重置过渡话题记忆
         self._last_bridge_hint = None  # 🔥 重置当前过渡提示
         self._consecutive_free_chat = 0  # 🔥 重置自由闲聊计数
+        self._consecutive_buffer_count = 0  # 🔥 重置连续缓冲计数
+        self._precomputed_next_task = None  # 🔥 重置预计算任务
+        self._prefetched_retrieval = None  # 🔥 重置预取检索结果
+        self._current_turn_topic_set = False
         self._pending_consent_task_id = None
         self._consent_granted_task_id = None
         self._task_cooldown_until = {}
@@ -1724,8 +1728,9 @@ class ADScreeningAgentFunctionCalling:
             
             try:
                 from src.llm.http_client_pool import get_siliconflow_chat_openai
+                router_model = os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
                 llm = get_siliconflow_chat_openai(
-                    model="Qwen/Qwen2.5-72B-Instruct",
+                    model=router_model,
                     temperature=0.5,
                     timeout=15,
                     max_retries=1,
@@ -1793,8 +1798,9 @@ class ADScreeningAgentFunctionCalling:
             print(f"[TaskPool] 🧠 第一步：自由选择话题...")
             
             from src.llm.http_client_pool import get_siliconflow_chat_openai
+            router_model = os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
             llm = get_siliconflow_chat_openai(
-                model="Qwen/Qwen2.5-72B-Instruct",
+                model=router_model,
                 temperature=0.7,
                 timeout=15,
                 max_retries=1,
@@ -2658,4 +2664,3 @@ class ADScreeningAgentFunctionCalling:
             
         except Exception as e:
              print(f"[AgentFC] ⚠️ 全局扫描失败: {e}")
-
