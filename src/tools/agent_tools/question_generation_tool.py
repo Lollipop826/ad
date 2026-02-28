@@ -297,6 +297,62 @@ class QuestionGenerationTool(BaseTool):
             prefix = prefix.rstrip('，。 ')
             return f"{prefix}。{new_q}"
         return new_q
+
+    def _has_ack_before_question(self, utterance: str) -> bool:
+        """判断是否满足“先回应，再提问”结构。"""
+        import re
+
+        text = (utterance or "").strip()
+        if not text:
+            return False
+
+        m = re.search(r'([^？?]*[？?])\s*$', text)
+        if not m:
+            return False
+
+        prefix = text[:m.start(1)].strip("，。；;!！~～ ")
+        if len(prefix) < 4:
+            return False
+
+        # 过滤“只有称呼”的伪回应
+        if re.fullmatch(r'[\u4e00-\u9fa5]{1,6}(爷爷|奶奶|叔叔|阿姨|先生|女士)?', prefix):
+            return False
+        return True
+
+    def _enforce_ack_with_llm(
+        self,
+        utterance: str,
+        last_user_msg: str,
+        topic_hint: str,
+        active_llm: ChatOpenAI,
+    ) -> str:
+        """
+        缺少回应时，用 LLM 二次改写为“先回应再提问”。
+        仅做改写，不走代码模板兜底。
+        """
+        try:
+            prompt = (
+                "把下面这句话改写成一条口语化回复，严格只输出 JSON：{\"utterance\":\"...\"}\n"
+                "硬性要求：\n"
+                "1) 必须先回应对方刚才的话，再提一个问题。\n"
+                "2) 只能有一个问号。\n"
+                "3) 回应必须和对方原话直接相关，不能空泛附和。\n"
+                "4) 问题要围绕目标话题。\n\n"
+                f"对方原话：{last_user_msg}\n"
+                f"目标话题：{topic_hint or '当前任务'}\n"
+                f"原句：{utterance}"
+            )
+            response = active_llm.invoke([{"role": "user", "content": prompt}])
+            raw = response.content if hasattr(response, "content") else str(response)
+            raw = (raw or "").strip()
+            parsed = json.loads(raw)
+            rewritten = (parsed.get("utterance") or "").strip()
+            if rewritten and self._has_ack_before_question(rewritten):
+                return rewritten
+        except Exception as e:
+            print(f"[QuestionGenTool] ⚠️ 二次改写失败，保留原句: {e}")
+
+        return utterance
     
     def _run(
         self,
@@ -630,6 +686,19 @@ class QuestionGenerationTool(BaseTool):
             
             # 最终清洗
             question = re.sub(r"^(医生|护士|我)[:：]\s*", "", question).strip()
+
+            # 结构兜底：若缺少回应且有用户原话，触发一次 LLM 二次改写
+            if last_user_msg and question and not self._has_ack_before_question(question):
+                topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
+                repaired = self._enforce_ack_with_llm(
+                    utterance=question,
+                    last_user_msg=last_user_msg,
+                    topic_hint=topic_hint,
+                    active_llm=active_llm,
+                )
+                if repaired != question:
+                    print("[QuestionGenTool] 🔧 已补齐回应段（LLM二次改写）")
+                question = repaired
             
             # 清理问题末尾
             if question and not question.endswith(("？", "?", "。", ".", "！", "!", "~", "～")):
