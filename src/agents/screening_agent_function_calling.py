@@ -1932,7 +1932,7 @@ class ADScreeningAgentFunctionCalling:
         task_hints = {
             "persona_collect_1": "了解对方的兴趣爱好（喜欢做什么、看什么、玩什么）。⚠️注意：如果对方说没爱好，不要强行追问，可以问问年轻时喜欢干啥，或者直接聊别的",
             "persona_collect_2": "了解对方的生活习惯（作息、饮食、日常活动）。⚠️注意：如果对方否定（如不吃早饭、不起床），不要追问吃了啥，而是问原因或通过'那午饭呢'等方式自然切换话题",
-            "buffer_chat": "随便聊聊，可以聊天气、聊最近的事、聊家常"
+            "buffer_chat": "顺着对方刚才的话题自然聊，不要突然切到无关内容"
         }
         default_hint = task_hints.get(task_id, "随便聊聊")
         
@@ -1946,8 +1946,14 @@ class ADScreeningAgentFunctionCalling:
         if bridge_hint:
             # 从 bridge_hint 提取目标话题 (格式: "A→B")
             to_topic = bridge_hint.split("→")[-1].strip() if "→" in bridge_hint else bridge_hint
-            # 用话题作为主指令，任务指令作为参考
-            hint = f"围绕「{to_topic}」这个话题自然聊天。可以参考：{default_hint}"
+            # 用话题作为主指令，buffer_chat 不再拼接固定参考文案，避免“近况+聊天气”冲突
+            if task_id == "buffer_chat":
+                hint = (
+                    f"围绕「{to_topic}」这个话题自然聊天。"
+                    f"顺着对方刚才的话往下聊，不要切到与「{to_topic}」无关的话题。"
+                )
+            else:
+                hint = f"围绕「{to_topic}」这个话题自然聊天。可以参考：{default_hint}"
             # 🔥 注入防重复指令
             last_user_content = chat_history[-1].get('content', '') if chat_history else ''
             if last_user_content:
