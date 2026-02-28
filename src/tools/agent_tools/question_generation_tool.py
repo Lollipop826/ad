@@ -208,15 +208,73 @@ class QuestionGenerationTool(BaseTool):
         patient_name: Optional[str] = None,
         patient_gender: Optional[str] = None,
         patient_age: Optional[int] = None,
+        user_answer: Optional[str] = None,
     ) -> str:
         """当 ack 被清空时，补一条简短的非问句回应，保留过渡感。"""
+        import re
+
+        snippet = ""
+        if user_answer:
+            candidate = re.split(r"[，。！？?]", user_answer.strip())[0].strip()
+            if 3 <= len(candidate) <= 18:
+                snippet = candidate
+
+        if snippet:
+            base = f"您刚说{snippet}，我听着挺好。"
+        else:
+            base = "听您这么说我也挺高兴的。"
+
         if patient_name:
             if patient_gender == '男':
                 suffix = '爷爷' if (patient_age and patient_age >= 60) else '叔叔'
             else:
                 suffix = '奶奶' if (patient_age and patient_age >= 60) else '阿姨'
-            return f"{patient_name}{suffix}，听您这么说我也挺高兴的。"
-        return "听您这么说我也挺高兴的。"
+            return f"{patient_name}{suffix}，{base}"
+        return base
+
+    def _extract_topic_hint(self, task_instruction: Optional[str], bridge_hint: Optional[str]) -> str:
+        import re
+        task = task_instruction or ""
+        m = re.search(r"「([^」]{1,12})」", task)
+        if m:
+            return m.group(1).strip()
+        if bridge_hint:
+            return bridge_hint.split("→")[-1].strip()
+        return ""
+
+    def _is_too_open_ended(self, q: str) -> bool:
+        text = (q or "").strip()
+        if not text:
+            return False
+        risky_patterns = [
+            r"新鲜事",
+            r"分享一下",
+            r"最近.*(怎么样|咋样|如何)",
+            r"最近有.*(吗|么|呢|？|\?)",
+            r"讲讲",
+            r"说说看",
+        ]
+        import re
+        return any(re.search(p, text) for p in risky_patterns)
+
+    def _rewrite_open_question(
+        self, q: str, topic_hint: str, dimension_name: str
+    ) -> str:
+        """仅在命中空泛问法时触发，把问题改成更具体、老人更易回答的问法。"""
+        topic = (topic_hint or "").strip()
+        if "爱好" in topic or "兴趣" in topic:
+            return "您平时更喜欢散散步，还是在家看看电视呀？"
+        if "生活" in topic or "日常" in topic:
+            return "您今天白天在家一般做点啥呀？"
+        if "心情" in topic:
+            return "您今天心情挺不错的，是不是和家里人聊了会儿天呀？"
+        if "回忆" in topic:
+            return "您年轻的时候平时最爱做什么呀？"
+        if "天气" in topic:
+            return "今天天气还行，您今天有出去走走吗？"
+        if dimension_name == "闲聊":
+            return "您今天在家是看看电视，还是听听歌呀？"
+        return q
     
     def _run(
         self,
@@ -261,8 +319,10 @@ class QuestionGenerationTool(BaseTool):
             "2) q 是下一句要问的问题，必须口语化、具体、可直接回答。\n"
             "3) 必须执行任务指令；若有 must_include，q 必须包含。\n"
             "4) 若有 bridge_hint，q 必须直接命中该目标话题。\n"
-            "5) 避免机械连接词、说教口吻和重复问法。\n"
-            "6) 不要输出任何解释、前后缀或 Markdown。"
+            "5) 对认知减退老人，一次只问一件事，优先日常具体问题。\n"
+            "6) 避免空泛问法，如“最近有什么新鲜事分享一下”。\n"
+            "7) 可用轻量选择式问法（如“您更喜欢A还是B”），但不要连环追问。\n"
+            "8) 不要输出任何解释、前后缀或 Markdown。"
         )
         
         user_prompt_parts = []
@@ -354,10 +414,10 @@ class QuestionGenerationTool(BaseTool):
             emotion_map = {'happy': '心情不错', 'sad': '有点低落', 'angry': '有点烦躁', 'fear': '有点紧张'}
             user_prompt_parts.append(f"对方现在{emotion_map.get(patient_emotion, '心情一般')}")
         
+        last_user_msg = ""
         if conversation_history:
             history_list = conversation_history if isinstance(conversation_history, list) else []
             
-            last_user_msg = ""
             prev_ai_responses = []  # 收集之前AI的回复，用于防重复
             
             if history_list and len(history_list) > 0:
@@ -460,9 +520,12 @@ class QuestionGenerationTool(BaseTool):
                 ack = parsed.get("ack", "").strip()
                 q = parsed.get("q", "").strip()
                 q = self._keep_single_question(q)
+                topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
+                if self._is_too_open_ended(q):
+                    q = self._rewrite_open_question(q, topic_hint, dimension_name)
                 ack = self._sanitize_ack(ack, q)
                 if not ack and q:
-                    ack = self._build_ack_fallback(patient_name, patient_gender, patient_age)
+                    ack = self._build_ack_fallback(patient_name, patient_gender, patient_age, last_user_msg)
                 
                 print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
                 
@@ -498,9 +561,12 @@ class QuestionGenerationTool(BaseTool):
                     ack = ack_match.group(1).strip()
                     q = q_match.group(1).strip()
                     q = self._keep_single_question(q)
+                    topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
+                    if self._is_too_open_ended(q):
+                        q = self._rewrite_open_question(q, topic_hint, dimension_name)
                     ack = self._sanitize_ack(ack, q)
                     if not ack and q:
-                        ack = self._build_ack_fallback(patient_name, patient_gender, patient_age)
+                        ack = self._build_ack_fallback(patient_name, patient_gender, patient_age, last_user_msg)
                     print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
                     if ack and q:
                         question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
