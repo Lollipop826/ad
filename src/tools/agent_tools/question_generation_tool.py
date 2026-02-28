@@ -233,46 +233,6 @@ class QuestionGenerationTool(BaseTool):
             a += "。"
         return a
 
-    def _build_ack_fallback(
-        self,
-        patient_name: Optional[str] = None,
-        patient_gender: Optional[str] = None,
-        patient_age: Optional[int] = None,
-        user_answer: Optional[str] = None,
-        patient_emotion: Optional[str] = None,
-    ) -> str:
-        """当 ack 被清空时，补一条简短的非问句回应，保留过渡感。"""
-        import re
-
-        snippet = ""
-        refusal_markers = ["不想回答", "不回答", "不想说", "不说了", "不想做", "别问了", "不聊了"]
-        if user_answer:
-            candidate = re.split(r"[，。！？?]", user_answer.strip())[0].strip()
-            if 3 <= len(candidate) <= 18 and not any(m in candidate for m in refusal_markers):
-                snippet = candidate
-
-        if user_answer and any(m in user_answer for m in refusal_markers):
-            base = "没关系，不想回答也行，咱们先聊点轻松的。"
-        elif patient_emotion in {"sad", "fear"}:
-            base = "我知道您现在有点不舒服，咱慢慢来，不着急。"
-        elif patient_emotion == "angry":
-            base = "我明白您有点烦，咱先放轻松一点。"
-        elif snippet:
-            if any(k in snippet for k in ["还可以", "一般", "凑合", "舒畅", "开心", "不错"]):
-                base = f"明白，您刚说{snippet}。"
-            else:
-                base = f"原来是这样，您刚说{snippet}。"
-        else:
-            base = "明白了，咱慢慢聊。"
-
-        if patient_name:
-            if patient_gender == '男':
-                suffix = '爷爷' if (patient_age and patient_age >= 60) else '叔叔'
-            else:
-                suffix = '奶奶' if (patient_age and patient_age >= 60) else '阿姨'
-            return f"{patient_name}{suffix}，{base}"
-        return base
-
     def _extract_topic_hint(self, task_instruction: Optional[str], bridge_hint: Optional[str]) -> str:
         import re
         task = task_instruction or ""
@@ -564,17 +524,16 @@ class QuestionGenerationTool(BaseTool):
             try:
                 # 尝试直接解析
                 parsed = json_module.loads(cleaned_output)
-                ack = parsed.get("ack", "").strip()
+                raw_ack = parsed.get("ack", "").strip()
                 q = parsed.get("q", "").strip()
                 q = self._keep_single_question(q)
                 topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
                 if self._is_too_open_ended(q):
                     q = self._rewrite_open_question(q, topic_hint, dimension_name)
-                ack = self._sanitize_ack(ack, q)
-                if not ack and q:
-                    ack = self._build_ack_fallback(
-                        patient_name, patient_gender, patient_age, last_user_msg, patient_emotion
-                    )
+                ack = self._sanitize_ack(raw_ack, q)
+                # 不使用代码兜底 ACK；若去重后为空但 LLM 提供了 ack，保留其清洗版
+                if not ack and raw_ack:
+                    ack = self._sanitize_ack(raw_ack, "")
                 
                 print(f"[QuestionGenTool] ✅ JSON解析成功: ack='{ack}', q='{q[:30]}...'")
                 
@@ -607,17 +566,16 @@ class QuestionGenerationTool(BaseTool):
                 q_match = re.search(r'"q"\s*:\s*"([^"]*)"', cleaned_output)
                 
                 if ack_match and q_match:
-                    ack = ack_match.group(1).strip()
+                    raw_ack = ack_match.group(1).strip()
                     q = q_match.group(1).strip()
                     q = self._keep_single_question(q)
                     topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
                     if self._is_too_open_ended(q):
                         q = self._rewrite_open_question(q, topic_hint, dimension_name)
-                    ack = self._sanitize_ack(ack, q)
-                    if not ack and q:
-                        ack = self._build_ack_fallback(
-                            patient_name, patient_gender, patient_age, last_user_msg, patient_emotion
-                        )
+                    ack = self._sanitize_ack(raw_ack, q)
+                    # 不使用代码兜底 ACK；若去重后为空但 LLM 提供了 ack，保留其清洗版
+                    if not ack and raw_ack:
+                        ack = self._sanitize_ack(raw_ack, "")
                     print(f"[QuestionGenTool] ✅ 正则提取成功: ack='{ack}', q='{q[:30]}...'")
                     if ack and q:
                         question = f"{ack}，{q}" if not ack.endswith(("！", "!", "~", "～")) else f"{ack}{q}"
