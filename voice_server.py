@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import os
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -15,8 +16,12 @@ from dotenv import load_dotenv
 # 创建 base64 模块别名，避免嵌套函数闭包问题
 _base64 = base64
 
-# 加载环境变量
-load_dotenv()
+# 加载环境变量：PyInstaller 打包后 exe 所在目录，普通运行时当前目录
+if getattr(sys, 'frozen', False):
+    _env_path = os.path.join(os.path.dirname(sys.executable), '.env')
+else:
+    _env_path = '.env'
+load_dotenv(_env_path)
 
 # 强制设置 HuggingFace 镜像（防止 .env 未生效）
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"

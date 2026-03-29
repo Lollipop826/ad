@@ -19,8 +19,10 @@ import hashlib
 import time
 try:
     import torch
+    _inference_mode = torch.inference_mode()
 except ImportError:
     torch = None
+    _inference_mode = lambda f: f  # no-op decorator when torch unavailable
 from typing import Optional, Generator, AsyncGenerator
 
 # 添加 ZipVoice 到路径
@@ -349,7 +351,7 @@ class ZipVoiceTTS:
         temp_dir.mkdir(parents=True, exist_ok=True)
         return str(temp_dir / f"tts_{digest}.wav")
     
-    @torch.inference_mode()
+    @_inference_mode
     def _generate_speech_sync(self, text: str, speed: float = 1.0) -> np.ndarray:
         """同步生成语音"""
         if self.prompt_features is None:
