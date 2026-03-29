@@ -29,10 +29,11 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import numpy as np
 import onnxruntime as ort
 
-_USE_ARK_ASR = os.getenv("USE_ARK_ASR", "false").lower() == "true"
-_USE_ARK_TTS = os.getenv("USE_ARK_TTS", "false").lower() == "true"
-_USE_SPEAKER_VERIFIER = os.getenv("USE_SPEAKER_VERIFIER", "true").lower() == "true"
-_USE_LOCAL_EMBEDDING = os.getenv("USE_LOCAL_EMBEDDING", "true").lower() == "true"
+_is_frozen = getattr(sys, 'frozen', False)
+_USE_ARK_ASR = os.getenv("USE_ARK_ASR", "true" if _is_frozen else "false").lower() == "true"
+_USE_ARK_TTS = os.getenv("USE_ARK_TTS", "true" if _is_frozen else "false").lower() == "true"
+_USE_SPEAKER_VERIFIER = os.getenv("USE_SPEAKER_VERIFIER", "false" if _is_frozen else "true").lower() == "true"
+_USE_LOCAL_EMBEDDING = os.getenv("USE_LOCAL_EMBEDDING", "false" if _is_frozen else "true").lower() == "true"
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
