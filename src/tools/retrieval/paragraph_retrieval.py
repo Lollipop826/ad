@@ -6,10 +6,16 @@ import shutil
 from typing import List
 
 from langchain_core.documents import Document
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
-from langchain_community.vectorstores.utils import filter_complex_metadata
-import chromadb
+try:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_community.vectorstores import Chroma
+    from langchain_community.vectorstores.utils import filter_complex_metadata
+    import chromadb
+except ImportError:
+    HuggingFaceEmbeddings = None
+    Chroma = None
+    filter_complex_metadata = None
+    chromadb = None
 
 
 def load_documents_from_jsonl_dir(directory: str) -> List[Document]:
