@@ -21,12 +21,12 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements_windows.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-        pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
+        pip install -r requirements_windows.txt
+        pip install pyinstaller
 
     - name: Download Silero VAD ONNX model
       run: |
-        pip install silero-vad --target silero_tmp -i https://pypi.tuna.tsinghua.edu.cn/simple
+        pip install silero-vad --target silero_tmp
         mkdir -p dist_data
         copy silero_tmp\silero_vad\data\silero_vad.onnx dist_data\silero_vad.onnx
       shell: cmd
