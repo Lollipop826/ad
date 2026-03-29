@@ -34,7 +34,7 @@ SPECIAL_DIMENSIONS: Dict[str, Dict[str, Any]] = {
         ],
     },
     'attention_calculation': {
-        'trigger': 'on_switch',
+        'trigger': 'always',
         'purpose': '测试注意力和计算能力',
         'log_tag': '🔢 注意力计算',
         'default_config': {'start': 100, 'step': 7},
@@ -89,6 +89,10 @@ class StandardQuestionToolArgs(BaseModel):
         default=7,
         description="连续减法的步长（默认7）"
     )
+    last_user_message: Optional[str] = Field(
+        default=None,
+        description="用户上一轮说的话，用于生成自然的回应过渡"
+    )
 
 
 class StandardQuestionTool(BaseTool):
@@ -124,15 +128,27 @@ class StandardQuestionTool(BaseTool):
             print("[StandardQuestionTool] 🏠 使用本地模型 (7b_complex)")
         else:
             # 使用 API
-            from src.llm.http_client_pool import get_siliconflow_chat_openai
-            self._llm = get_siliconflow_chat_openai(
-                model="Qwen/Qwen2.5-7B-Instruct",
-                temperature=0.7,
-                max_tokens=200,
-                timeout=10,
-                max_retries=1,
-            )
-            print("[StandardQuestionTool] 🌐 使用 API 模式")
+            import os as _os
+            if _os.getenv("ARK_API_KEY"):
+                from src.llm.http_client_pool import get_volcengine_chat_openai
+                self._llm = get_volcengine_chat_openai(
+                    model="doubao-seed-2-0-mini-260215",
+                    temperature=0.7,
+                    max_tokens=200,
+                    timeout=10,
+                    max_retries=1,
+                )
+                print("[StandardQuestionTool] 🌋 使用火山引擎")
+            else:
+                from src.llm.http_client_pool import get_siliconflow_chat_openai
+                self._llm = get_siliconflow_chat_openai(
+                    model="Qwen/Qwen2.5-7B-Instruct",
+                    temperature=0.7,
+                    max_tokens=200,
+                    timeout=10,
+                    max_retries=1,
+                )
+                print("[StandardQuestionTool] 🔵 使用 SiliconFlow")
     
     def _extract_response(self, response) -> str:
         """从 LLM 响应中提取文本（兼容本地模型和 API）"""
@@ -151,6 +167,7 @@ class StandardQuestionTool(BaseTool):
         patient_name: Optional[str] = None,
         calculation_current_value: Optional[int] = None,
         calculation_step: Optional[int] = 7,
+        last_user_message: Optional[str] = None,
     ) -> str:
         """
         生成特殊维度的问题
@@ -184,11 +201,11 @@ class StandardQuestionTool(BaseTool):
         
         # 根据维度类型生成问题
         if dimension_id == 'registration':
-            return self._generate_registration_question(config, patient_name)
+            return self._generate_registration_question(config, patient_name, last_user_message)
         elif dimension_id == 'attention_calculation':
-            return self._generate_calculation_question(config, patient_name, calculation_current_value, calculation_step)
+            return self._generate_calculation_question(config, patient_name, calculation_current_value, calculation_step, last_user_message)
         elif dimension_id == 'recall':
-            return self._generate_recall_question(config, memory_words, patient_name)
+            return self._generate_recall_question(config, memory_words, patient_name, last_user_message)
         elif dimension_id == 'copy':
             return self._generate_copy_question(config, patient_name)
         elif dimension_id == 'language_repetition':
@@ -204,10 +221,15 @@ class StandardQuestionTool(BaseTool):
         
         return json.dumps({"has_standard_question": False}, ensure_ascii=False)
     
-    def _generate_registration_question(self, config: dict, patient_name: Optional[str]) -> str:
+    def _generate_registration_question(self, config: dict, patient_name: Optional[str], last_user_message: Optional[str] = None) -> str:
         """生成即时记忆问题 - LLM 自主选择三个词"""
         
         context_info = f"患者叫{patient_name}。" if patient_name else ""
+        
+        # 构建对话上下文
+        ack_instruction = ""
+        if last_user_message and last_user_message.strip():
+            ack_instruction = f'\n5. 对方刚说了「{last_user_message.strip()}」，question 的开头必须先简短回应这句话（最多15字，引用对方说的具体内容），然后自然过渡到让对方记词。例如：「一年半了呀，住挺久的。对了我说三个词……」'
         
         prompt = f"""你是一位温柔的老年科医生，正在和老人聊天。{context_info}
 现在需要让老人记住三个词并复述。
@@ -219,7 +241,7 @@ class StandardQuestionTool(BaseTool):
    - 必须是中文双字词（如：苹果、桌子、硬币）
 2. 用温和亲切的语气引导，如果是长辈可以用"您"
 3. 清晰地说出这三个词，并让老人复述一遍
-4. **仅输出JSON格式**，不要包含Markdown标记或其他文字
+4. **仅输出JSON格式**，不要包含Markdown标记或其他文字{ack_instruction}
 
 好的词例：
 - 苹果、桌子、硬币
@@ -233,6 +255,22 @@ class StandardQuestionTool(BaseTool):
         default_words = config.get('default_words', ['苹果', '桌子', '硬币'])
         words_str = '、'.join(default_words)
         fallback_question = f"咱们来个小游戏，我说三个词，您听好了跟着说一遍：{words_str}。您来说一遍？"
+        
+        # 🔥 构建 ack 前缀（用于 fallback 模板也能带上回应）
+        _ack_prefix = ""
+        if last_user_message and last_user_message.strip():
+            _msg = last_user_message.strip().rstrip('。.！!？?')
+            # 提取关键短语做简短回应（不照搬原话）
+            import re as _re
+            # 尝试提取数字+量词短语（如"一年半"、"5楼"、"93块"）
+            num_match = _re.search(r'[\d一二三四五六七八九十百千]+[\w]*[年月天楼层岁个块钱][\w]{0,2}', _msg)
+            if num_match:
+                phrase = num_match.group().rstrip('了吧呢啊')
+                _ack_prefix = f"{phrase}呀。对了，"
+            elif len(_msg) <= 8:
+                _ack_prefix = f"嗯呐。对了，"
+            else:
+                _ack_prefix = f"嗯呐。对了，"
 
         try:
             response = self._llm.invoke([{"role": "user", "content": prompt}])
@@ -267,17 +305,17 @@ class StandardQuestionTool(BaseTool):
                 words_str = '、'.join(words)
                 # 重新构建问题以确保包含这些词
                 if patient_name:
-                    question = f"{patient_name}爷爷，我说三个词，您听好了：{words_str}。请您复述一遍？"
+                    question = f"{_ack_prefix}{patient_name}，我说三个词，您听好了：{words_str}。请您复述一遍？"
                 else:
-                    question = f"我说三个词，您听好了：{words_str}。请您复述一遍？"
+                    question = f"{_ack_prefix}我说三个词，您听好了：{words_str}。请您复述一遍？"
             
             # 确保词语在问题中
             if question and not all(w in question for w in words):
                 words_str = '、'.join(words)
                 if patient_name:
-                    question = f"{patient_name}，我说三个词，您听好了：{words_str}。请您复述一遍？"
+                    question = f"{_ack_prefix}{patient_name}，我说三个词，您听好了：{words_str}。请您复述一遍？"
                 else:
-                    question = f"我说三个词，您听好了：{words_str}。请您复述一遍？"
+                    question = f"{_ack_prefix}我说三个词，您听好了：{words_str}。请您复述一遍？"
             
             print(f"[StandardQuestion] ✅ 生成问题: {question[:50]}...")
             print(f"[StandardQuestion] 📝 LLM选择的词: {words}")
@@ -301,7 +339,8 @@ class StandardQuestionTool(BaseTool):
         config: dict, 
         patient_name: Optional[str],
         current_value: Optional[int] = None,
-        step: Optional[int] = 7
+        step: Optional[int] = 7,
+        last_user_message: Optional[str] = None
     ) -> str:
         """
         生成注意力计算问题（支持连续减法状态跟踪）
@@ -326,40 +365,30 @@ class StandardQuestionTool(BaseTool):
         
         context_info = f"患者叫{patient_name}。" if patient_name else ""
         
+        ack_part = ""
+        if is_first_round and last_user_message and last_user_message.strip():
+            ack_part = f'\n- 对方刚说了「{last_user_message.strip()}」，开头先简短回应（最多15字），再自然过渡到算术场景。'
+        
         if is_first_round:
-            # 第一轮：介绍任务
-            prompt = f"""你是一位温柔的老年科医生，正在和老人聊天。{context_info}
-现在需要让老人做连续减法：从 {start} 开始，每次减 {step}。
+            prompt = f"""你是老人的晚辈，在轻松唠嗑。{context_info}
+用一个生活买菜/买东西的场景，自然地问出"{start}减{step}等于多少"。
+不要说"咱们做道算术题"，要像聊家常一样带出来。
 
-要求：
-1. 用轻松的语气引导，不要让老人有压力
-2. 必须明确说明"从{start}减去{step}"
-3. 一句话，不要太长
-4. **仅输出JSON格式**
+要求：一句话，口语化，必须包含数字{start}和{step}。仅输出JSON。{ack_part}
+示例：
+- "对了，要是您拿{start}块钱去买菜，花了{step}块，还剩多少钱呀？"
+- "话说您要有{start}块钱，买个{step}块的西瓜，兜里还剩多少？"
 
-示例风格：
-- "咱们算个数儿，100减7是多少？"
-- "来，李叔叔，咱们一起算个小题，100减去7等于多少呀？"
-
-请严格按此JSON格式回复：
 {{"question": "生成的问句"}}"""
         else:
-            # 后续轮次：继续减
-            prompt = f"""你是一位温柔的老年科医生，正在陪老人做连续减法。{context_info}
-刚才老人已经算到 {start}，现在需要继续问 {start} 减 {step} 是多少。
+            prompt = f"""你是老人的晚辈，在陪老人接着算买菜的账。{context_info}
+上一轮老人算出还剩{start}块钱，现在继续问：再花{step}块，还剩多少？
+用口语，简短接话，一句话。仅输出JSON。
 
-要求：
-1. 简单接话，继续问下一题
-2. 必须明确包含数字 {start} 和 {step}
-3. 一句话，简短
-4. **仅输出JSON格式**
+示例：
+- "还剩{start}块呢，再花{step}块买点鸡蛋，还剩多少？"
+- "{start}块钱，又花了{step}块，还剩多少呀？"
 
-示例风格：
-- "对，那{start}再减{step}呢？"
-- "好的，继续，{start}减{step}是多少？"
-- "不错，那{start}再减去{step}呢？"
-
-请严格按此JSON格式回复：
 {{"question": "生成的问句"}}"""
 
         try:
@@ -393,20 +422,14 @@ class StandardQuestionTool(BaseTool):
             if question:
                 if str(start) not in question or str(step) not in question:
                     if is_first_round:
-                        if patient_name:
-                            question = f"{patient_name}叔叔，咱们算个数儿，{start}减{step}是多少？"
-                        else:
-                            question = f"咱们算个数儿，{start}减{step}是多少？"
+                        question = f"对了，要是您拿{start}块钱去买菜，花了{step}块，还剩多少钱呀？"
                     else:
-                        question = f"好，那{start}减{step}呢？"
+                        question = f"{start}块钱，再花{step}块买点东西，还剩多少呀？"
             else:
                 if is_first_round:
-                    if patient_name:
-                        question = f"{patient_name}叔叔，咱们算个数儿，{start}减{step}是多少？"
-                    else:
-                        question = f"咱们算个数儿，{start}减{step}是多少？"
+                    question = f"对了，要是您拿{start}块钱去买菜，花了{step}块，还剩多少钱呀？"
                 else:
-                    question = f"好，那{start}减{step}呢？"
+                    question = f"{start}块钱，再花{step}块买点东西，还剩多少呀？"
             
             print(f"[StandardQuestion] ✅ 生成问题: {question} (期望答案: {expected_answer})")
             
@@ -428,7 +451,8 @@ class StandardQuestionTool(BaseTool):
             raise e
     
     def _generate_recall_question(
-        self, config: dict, memory_words: Optional[List[str]], patient_name: Optional[str]
+        self, config: dict, memory_words: Optional[List[str]], patient_name: Optional[str],
+        last_user_message: Optional[str] = None
     ) -> str:
         """生成延迟回忆问题"""
         
@@ -439,6 +463,10 @@ class StandardQuestionTool(BaseTool):
         
         context_info = f"患者叫{patient_name}。" if patient_name else ""
         
+        ack_instruction = ""
+        if last_user_message and last_user_message.strip():
+            ack_instruction = f'\n5. 对方刚说了「{last_user_message.strip()}」，开头先简短回应（最多15字），再自然过渡到问记忆词。'
+        
         prompt = f"""你是一位温柔的老年科医生，正在和老人聊天。{context_info}
 之前让老人记住了三个词：{', '.join(memory_words)}
 现在需要问老人是否还记得这三个词。
@@ -447,7 +475,7 @@ class StandardQuestionTool(BaseTool):
 1. 用温和的语气询问，不要给老人压力
 2. **绝对不要**直接说出那三个词，而是问"刚才那三个词"或"刚才让您记的东西"
 3. 给老人鼓励，让他们尝试回忆
-4. **仅输出JSON格式**
+4. **仅输出JSON格式**{ack_instruction}
 
 示例风格：
 - "诶，刚才我说的那三个词，您还能想起来吗？"

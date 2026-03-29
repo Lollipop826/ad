@@ -272,6 +272,166 @@
             gap: 1rem;
         }
 
+        #event-log-panel {
+            margin: 0 2rem 1rem;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            border-radius: 22px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+            transition: box-shadow 0.25s ease;
+        }
+
+        #event-log-panel:hover {
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.08);
+        }
+
+        .event-log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.9rem 1rem;
+            cursor: pointer;
+        }
+
+        .event-log-title {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .event-log-title i {
+            color: var(--primary-color);
+        }
+
+        .event-log-summary {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .event-log-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .log-chip {
+            border: none;
+            border-radius: 999px;
+            padding: 0.4rem 0.7rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            background: rgba(74, 144, 164, 0.12);
+            color: var(--primary-dark);
+        }
+
+        .log-chip.secondary {
+            background: rgba(113, 128, 150, 0.12);
+            color: var(--text-secondary);
+        }
+
+        .log-chip.active {
+            background: rgba(232, 146, 91, 0.18);
+            color: #B65F26;
+        }
+
+        .event-log-body {
+            max-height: 240px;
+            overflow-y: auto;
+            padding: 0 1rem 1rem;
+            border-top: 1px solid rgba(226, 232, 240, 0.8);
+        }
+
+        #event-log-panel.collapsed .event-log-body {
+            display: none;
+        }
+
+        .event-log-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+            padding-top: 0.9rem;
+        }
+
+        .event-log-empty {
+            padding: 1rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .event-item {
+            display: grid;
+            grid-template-columns: 72px 84px 1fr;
+            gap: 0.75rem;
+            align-items: start;
+            padding: 0.75rem 0.85rem;
+            background: rgba(255, 255, 255, 0.66);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            border-radius: 16px;
+        }
+
+        .event-time {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+            padding-top: 0.2rem;
+        }
+
+        .event-tag {
+            justify-self: start;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            border-radius: 999px;
+            padding: 0.28rem 0.55rem;
+            font-size: 0.72rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .event-tag.state { background: rgba(74, 144, 164, 0.14); color: #2C6E7F; }
+        .event-tag.asr { background: rgba(214, 158, 46, 0.16); color: #9C6B06; }
+        .event-tag.ai { background: rgba(56, 161, 105, 0.14); color: #26734A; }
+        .event-tag.tts { background: rgba(128, 90, 213, 0.14); color: #6841C6; }
+        .event-tag.score { background: rgba(232, 146, 91, 0.16); color: #B65F26; }
+        .event-tag.speaker { background: rgba(66, 153, 225, 0.16); color: #2B6CB0; }
+        .event-tag.system { background: rgba(113, 128, 150, 0.14); color: #4A5568; }
+        .event-tag.error { background: rgba(245, 101, 101, 0.16); color: #C53030; }
+
+        .event-main {
+            min-width: 0;
+        }
+
+        .event-message {
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            line-height: 1.55;
+            word-break: break-word;
+        }
+
+        .event-detail {
+            margin-top: 0.25rem;
+            font-size: 0.76rem;
+            color: var(--text-secondary);
+            line-height: 1.45;
+            word-break: break-word;
+        }
+
+        .event-caret {
+            transition: transform 0.2s ease;
+            color: var(--text-secondary);
+        }
+
+        #event-log-panel.collapsed .event-caret {
+            transform: rotate(-90deg);
+        }
+
         .message-row {
             display: flex;
             margin-bottom: 0.5rem;
@@ -382,6 +542,27 @@
             backdrop-filter: blur(5px);
             border: 1px solid rgba(255, 255, 255, 0.2);
         }
+
+        /* 评估结果标签 */
+        .eval-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-left: 10px;
+            vertical-align: middle;
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .eval-label.correct { background: rgba(16, 185, 129, 0.15); color: #059669; border-color: rgba(16, 185, 129, 0.3); }
+        .eval-label.incorrect { background: rgba(239, 68, 68, 0.15); color: #DC2626; border-color: rgba(239, 68, 68, 0.3); }
+        .eval-label.chat { background: rgba(139, 92, 246, 0.15); color: #7C3AED; border-color: rgba(139, 92, 246, 0.3); }
+        .eval-label.pending { background: rgba(245, 158, 11, 0.15); color: #D97706; border-color: rgba(245, 158, 11, 0.3); }
 
         /* ===== 🧠 思考指示器 — 大号醒目 ===== */
         .thinking-bubble {
@@ -691,6 +872,88 @@
             color: var(--text-primary);
         }
 
+        /* MMSE 浮动评分提示（右下角，自动淡出） */
+        .mmse-badge {
+            position: fixed;
+            right: 24px;
+            bottom: 120px;
+            max-width: 340px;
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 14px 16px;
+            box-shadow: 0 14px 40px rgba(15, 23, 42, 0.18);
+            border-left: 4px solid #4A90A4;
+            z-index: 120;
+            font-family: var(--font-main);
+            font-size: 13px;
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            opacity: 1;
+            transform: translateY(0);
+            transition: opacity 0.4s ease, transform 0.4s ease;
+        }
+
+        .mmse-badge-hide {
+            opacity: 0;
+            transform: translateY(10px);
+            pointer-events: none;
+        }
+
+        .mmse-badge-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 2px;
+        }
+
+        .mmse-badge-icon {
+            width: 26px;
+            height: 26px;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #4A90A4, #2C6E7F);
+            box-shadow: 0 4px 10px rgba(74, 144, 164, 0.4);
+            flex-shrink: 0;
+        }
+
+        .mmse-badge-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1f2933;
+        }
+
+        .mmse-badge-main {
+            font-size: 13px;
+            font-weight: 500;
+            color: #2d3748;
+        }
+
+        .mmse-badge-sub {
+            font-size: 12px;
+            color: #4b5563;
+        }
+
+        .mmse-badge-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .mmse-tag {
+            background: #f3f4f6;
+            border-radius: 999px;
+            padding: 2px 8px;
+            font-size: 11px;
+            color: #374151;
+        }
+
         /* --- Drawer (Sidebar) --- */
         #drawer-overlay {
             position: fixed;
@@ -821,6 +1084,263 @@
             text-align: center;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
         }
+
+        /* 📹 摄像头预览 */
+        #camera-container {
+            position: fixed;
+            bottom: 120px;
+            right: 16px;
+            z-index: 150;
+            display: none;
+        }
+        #camera-container.active {
+            display: block;
+        }
+        #camera-preview {
+            width: 160px;
+            height: 120px;
+            border-radius: 12px;
+            object-fit: cover;
+            border: 3px solid var(--primary-color);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            background: #000;
+        }
+        #camera-status {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #38A169;
+            border: 2px solid white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        #camera-status.evaluating {
+            background: var(--status-thinking);
+            animation: pulse 1s infinite;
+        }
+        #camera-status.recording {
+            background: #E53E3E;
+            animation: pulse 0.8s infinite;
+        }
+        #camera-label {
+            text-align: center;
+            font-size: 0.7rem;
+            color: white;
+            background: rgba(0,0,0,0.6);
+            border-radius: 0 0 12px 12px;
+            margin-top: -6px;
+            padding: 2px 0;
+        }
+
+        /* 📹 手动录制控制面板 */
+        #record-control {
+            position: fixed;
+            bottom: 260px;
+            right: 16px;
+            z-index: 160;
+            display: none;
+            background: rgba(0, 0, 0, 0.85);
+            border-radius: 16px;
+            padding: 12px 16px;
+            color: white;
+            text-align: center;
+            min-width: 170px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            backdrop-filter: blur(10px);
+        }
+        #record-control.active { display: block; }
+        #record-control .rec-title {
+            font-size: 0.75rem;
+            color: #94A3B8;
+            margin-bottom: 6px;
+        }
+        #record-control .rec-timer {
+            font-size: 1.4rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+        #record-control .rec-timer.recording {
+            color: #FC8181;
+        }
+        #record-control .rec-dot {
+            display: inline-block;
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: #FC8181;
+            margin-right: 6px;
+            animation: pulse 0.8s infinite;
+            vertical-align: middle;
+        }
+        .rec-btn {
+            display: inline-block;
+            padding: 8px 20px;
+            border: none;
+            border-radius: 24px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, opacity 0.15s;
+        }
+        .rec-btn:active { transform: scale(0.95); }
+        .rec-btn-start {
+            background: linear-gradient(135deg, #48BB78, #38A169);
+            color: white;
+        }
+        .rec-btn-stop {
+            background: linear-gradient(135deg, #FC8181, #E53E3E);
+            color: white;
+        }
+        .rec-btn-stop:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* 声纹拒绝 Toast */
+        .speaker-toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: rgba(245, 101, 101, 0.95);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            z-index: 300;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 8px 30px rgba(245, 101, 101, 0.3);
+            transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .speaker-toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        .speaker-toast .toast-icon {
+            font-size: 1.1rem;
+        }
+        .speaker-toast .toast-sim {
+            font-size: 0.75rem;
+            opacity: 0.85;
+            margin-left: 4px;
+        }
+
+        /* 🎨 数位板画图 Modal */
+        #drawing-modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 500;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        #drawing-modal.open { display: flex; }
+        .drawing-container {
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            max-width: 900px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .drawing-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .drawing-header h3 { margin: 0; color: var(--text-primary); font-size: 1.1rem; }
+        .drawing-body {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+        .drawing-ref {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .drawing-ref img {
+            width: 180px;
+            border: 2px solid #E2E8F0;
+            border-radius: 12px;
+            background: white;
+        }
+        .drawing-ref-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+        .drawing-canvas-wrap {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #drawing-canvas {
+            border: 2px solid var(--primary-color);
+            border-radius: 12px;
+            background: white;
+            cursor: crosshair;
+            touch-action: none;
+            display: block;
+            width: 100%;
+            height: 320px;
+        }
+        .drawing-tools {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .drawing-tools label { font-size: 0.8rem; color: var(--text-secondary); }
+        .drawing-size-slider { width: 80px; }
+        .drawing-color-picker { width: 32px; height: 32px; border: none; border-radius: 6px; cursor: pointer; padding: 0; }
+        .drawing-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .drawing-status {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            padding: 6px 0;
+            flex: 1;
+            align-self: center;
+        }
+        #drawing-evaluating-overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.85);
+            border-radius: 12px;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 12px;
+            font-size: 1rem;
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+        #drawing-evaluating-overlay.active { display: flex; }
     </style>
 </head>
 
@@ -843,6 +1363,8 @@
         <div id="hero-section">
             <div class="orb-container">
                 <div id="visual-orb" class="orb"></div>
+                <!-- 评估结果悬浮显示（位于球内部正中） -->
+                <div id="orb-eval-badge" class="eval-label" style="position: absolute; opacity: 0; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(0,0,0,0.2); font-size: 1.3rem; padding: 12px 24px; border-radius: 30px; z-index: 10; font-weight: 700; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9); white-space: nowrap;"></div>
             </div>
 
             <div id="status-display" class="status-badge" style="opacity: 0;">
@@ -861,6 +1383,28 @@
             </div>
         </div>
 
+        <div id="event-log-panel" class="collapsed">
+            <div class="event-log-header" onclick="toggleEventLogPanel()">
+                <div>
+                    <div class="event-log-title">
+                        <i class="fas fa-wave-square"></i>
+                        <span>运行日志</span>
+                    </div>
+                    <div id="event-log-summary" class="event-log-summary">显示关键流程事件，已自动过滤高频噪音</div>
+                </div>
+                <div class="event-log-actions">
+                    <button id="event-log-pause-btn" class="log-chip secondary" onclick="toggleEventLogPause(event)">暂停滚动</button>
+                    <button class="log-chip secondary" onclick="clearEventLog(event)">清空</button>
+                    <i class="fas fa-chevron-down event-caret"></i>
+                </div>
+            </div>
+            <div class="event-log-body">
+                <div id="event-log-list" class="event-log-list">
+                    <div class="event-log-empty">暂无运行事件</div>
+                </div>
+            </div>
+        </div>
+
         <!-- Controls -->
         <div id="control-bar">
             <!-- Interupt Button (Hidden unless speaking) -->
@@ -875,6 +1419,10 @@
 
             <button id="mic-btn" class="ctrl-btn btn-mic" onclick="toggleRecording()">
                 <i class="fas fa-microphone"></i>
+            </button>
+
+            <button class="ctrl-btn btn-secondary" onclick="exportChatHistory()" title="导出对话记录">
+                <i class="fas fa-download"></i>
             </button>
 
             <button id="end-btn" class="ctrl-btn btn-secondary" onclick="endSession()" disabled title="结束对话"
@@ -1032,16 +1580,79 @@
         </button>
     </div>
 
+    <!-- Speaker Rejection Toast -->
+    <div id="speaker-toast" class="speaker-toast">
+        <span class="toast-icon">🔇</span>
+        <span id="speaker-toast-text">非目标说话人，已忽略</span>
+        <span id="speaker-toast-sim" class="toast-sim"></span>
+    </div>
+
+    <!-- Manual Recording Control Panel -->
+    <div id="record-control">
+        <div class="rec-title" id="rec-task-label">请完成动作后点击录制</div>
+        <div class="rec-timer" id="rec-timer">00:00</div>
+        <div id="rec-btn-area">
+            <button class="rec-btn rec-btn-start" id="btn-rec-start" onclick="manualRecordStart()">开始录制</button>
+            <button class="rec-btn rec-btn-stop" id="btn-rec-stop" onclick="manualRecordStop()" style="display:none;">结束录制</button>
+        </div>
+    </div>
+
+    <!-- Camera Preview -->
+    <div id="camera-container">
+        <div style="position: relative;">
+            <video id="camera-preview" autoplay playsinline muted></video>
+            <div id="camera-status">📹</div>
+        </div>
+        <div id="camera-label">摄像头监测中</div>
+    </div>
+
     <!-- Image Modal -->
     <div id="image-modal">
         <div class="modal-content">
             <h3 id="image-title" style="margin-top: 0;">题目图片</h3>
-            <img id="display-image" src="" style="max-width: 100%; max-height: 50vh; border-radius: 10px;">
+            <img id="display-image" src="" alt="MMSE题目图片" style="max-width: 100%; max-height: 50vh; border-radius: 10px;"
+                 onerror="console.error('[Image] ❌ 图片加载失败:', this.src); this.alt='图片加载失败，请刷新页面重试'; this.style.border='2px solid red'; this.style.padding='20px';">
             <br>
             <button onclick="hideImage()"
                 style="margin-top: 1rem; padding: 0.8rem 2rem; background: #E2E8F0; border: none; border-radius: 30px; cursor: pointer;">
                 关闭
             </button>
+        </div>
+    </div>
+
+    <!-- Drawing Canvas Modal -->
+    <div id="drawing-modal">
+        <div class="drawing-container">
+            <div class="drawing-header">
+                <h3>🎨 请临摹右侧图形</h3>
+                <span style="font-size:0.8rem;color:var(--text-secondary)">用数位板在右侧白色区域临摹两个相交的五边形</span>
+            </div>
+            <div class="drawing-body">
+                <div class="drawing-ref">
+                    <img id="drawing-ref-img" src="/api/mmse-image/pentagons" alt="参考五边形">
+                    <div class="drawing-ref-label">参考图形</div>
+                </div>
+                <div class="drawing-canvas-wrap">
+                    <div class="drawing-tools">
+                        <label>笔迹粗细:</label>
+                        <input type="range" class="drawing-size-slider" id="drawing-size" min="1" max="20" value="4">
+                        <label>颜色:</label>
+                        <input type="color" class="drawing-color-picker" id="drawing-color" value="#1a1a2e">
+                        <button onclick="drawingUndo()" class="ctrl-btn btn-secondary" style="padding:6px 14px;font-size:0.8rem;">↩ 撤销</button>
+                        <button onclick="drawingClear()" class="ctrl-btn btn-secondary" style="padding:6px 14px;font-size:0.8rem;">🗑 清除</button>
+                    </div>
+                    <canvas id="drawing-canvas"></canvas>
+                    <div id="drawing-evaluating-overlay">
+                        <div style="font-size:2rem;">🔍</div>
+                        <div>AI 正在评估画作...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="drawing-footer">
+                <div class="drawing-status" id="drawing-status">在右侧画布上临摹图形，完成后点击「提交」</div>
+                <button onclick="hideDrawingModal()" class="ctrl-btn btn-secondary" style="padding:10px 20px;">取消</button>
+                <button onclick="drawingSubmit()" class="ctrl-btn btn-primary" id="drawing-submit-btn" style="padding:10px 24px;">✅ 提交画作</button>
+            </div>
         </div>
     </div>
 
@@ -1066,6 +1677,10 @@
         let ws = null;
         let isRecording = false;
         let sessionStarted = false;
+        let eventLogs = [];
+        let eventLogPaused = false;
+        let ttsChunkMetrics = { count: 0, startedAt: 0, lastSampleRate: null };
+        const EVENT_LOG_LIMIT = 80;
         let audioContext = null;
         let audioWorkletNode = null;
         let streamingPlayer = null; // 🎵 New Stream Player
@@ -1082,6 +1697,14 @@
             recall: { score: 0 },
             language: { score: 0 },
             copy: { score: 0 }
+        };
+        const mmseDimensionMeta = {
+            orientation: { label: '定向力', max: 10 },
+            registration: { label: '即时记忆', max: 3 },
+            attention_calculation: { label: '注意与计算', max: 5 },
+            recall: { label: '回忆能力', max: 3 },
+            language: { label: '语言能力', max: 8 },
+            copy: { label: '视空间', max: 1 }
         };
         const emotionLabels = {
             normal: { text: '正常', class: 'normal' },
@@ -1119,6 +1742,114 @@
             };
         }
 
+        // 最近一次 MMSE 浮动提示的定时器
+        let lastMMSEBadgeTimer = null;
+
+        // 计算本轮MMSE更新中“哪个维度发生了变化”（与当前前端缓存的 mmseScores 对比）
+        function computeMMSEDelta(summary, performance) {
+            const details = summary?.scoring_details?.dimension_scores || {};
+            const dimIds = Object.keys(details);
+            if (!dimIds.length) return null;
+
+            let changed = null;
+            dimIds.forEach(id => {
+                const newScore = details[id]?.score ?? 0;
+                const oldScore = mmseScores[id]?.score ?? 0;
+                const delta = newScore - oldScore;
+                if (delta > 0) {
+                    if (!changed || delta > changed.delta) {
+                        const meta = mmseDimensionMeta[id] || { label: id, max: details[id]?.max_score ?? 0 };
+                        changed = {
+                            dimensionId: id,
+                            dimensionLabel: meta.label,
+                            oldScore,
+                            newScore,
+                            delta,
+                            maxScore: meta.max ?? details[id]?.max_score ?? 0
+                        };
+                    }
+                }
+            });
+
+            if (!changed) return null;
+
+            // 从 performance 里查该维度最近一次质量/认知表现
+            let quality = null;
+            let cognitive = null;
+            if (performance && performance.performance_details && performance.performance_details.dimension_summary) {
+                const dimPerf = performance.performance_details.dimension_summary[changed.dimensionId];
+                if (dimPerf) {
+                    quality = dimPerf.latest_quality_level || null;
+                    cognitive = dimPerf.latest_cognitive_performance || dimPerf.latest_performance || null;
+                }
+            }
+
+            return {
+                ...changed,
+                totalScore: summary?.total_score ?? null,
+                totalMaxScore: summary?.total_max_score ?? 30,
+                cognitiveStatus: summary?.cognitive_status || '',
+                qualityLevel: quality,
+                cognitivePerformance: cognitive
+            };
+        }
+
+        function showMMSEBadge(delta) {
+            if (!delta) return;
+            if (lastMMSEBadgeTimer) {
+                clearTimeout(lastMMSEBadgeTimer);
+                lastMMSEBadgeTimer = null;
+            }
+
+            let badge = document.getElementById('mmse-badge');
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.id = 'mmse-badge';
+                badge.className = 'mmse-badge';
+                document.body.appendChild(badge);
+            }
+
+            const dimText = `${delta.dimensionLabel} +${delta.delta} 分，当前 ${delta.newScore}/${delta.maxScore || '?'}`;
+            const totalText = (delta.totalScore != null)
+                ? `当前总分 ${delta.totalScore}/${delta.totalMaxScore || 30}`
+                : '';
+            const statusText = delta.cognitiveStatus || '';
+
+            // 回答质量与认知表现标签
+            let qualityTag = '';
+            if (delta.qualityLevel) {
+                const q = String(delta.qualityLevel).toLowerCase();
+                const qualityMap = {
+                    excellent: '回答质量：优秀',
+                    good: '回答质量：良好',
+                    fair: '回答质量：一般',
+                    poor: '回答质量：较差'
+                };
+                qualityTag = qualityMap[q] || `回答质量：${delta.qualityLevel}`;
+            }
+            const cognitiveTag = delta.cognitivePerformance ? `认知表现：${delta.cognitivePerformance}` : '';
+
+            badge.classList.remove('mmse-badge-hide');
+            badge.innerHTML = `
+                <div class="mmse-badge-header">
+                    <div class="mmse-badge-icon">🧪</div>
+                    <div class="mmse-badge-title">本轮MMSE评分更新（临床参考）</div>
+                </div>
+                <div class="mmse-badge-main">${dimText}</div>
+                <div class="mmse-badge-sub">${[totalText, statusText].filter(Boolean).join(' · ')}</div>
+                <div class="mmse-badge-meta">
+                    ${qualityTag ? `<span class="mmse-tag">${qualityTag}</span>` : ''}
+                    ${cognitiveTag ? `<span class="mmse-tag">${cognitiveTag}</span>` : ''}
+                    <span class="mmse-tag">自动计分已记录</span>
+                    <span class="mmse-tag">仅供临床参考</span>
+                </div>
+            `;
+
+            lastMMSEBadgeTimer = setTimeout(() => {
+                badge.classList.add('mmse-badge-hide');
+            }, 5500);
+        }
+
         // ==========================================
         // 🎯 统一状态机 (Unified State Machine)
         // ==========================================
@@ -1132,6 +1863,7 @@
             const prevState = currentAppState;
             currentAppState = newState;
             console.log(`[状态] ${prevState} → ${newState}`, extra || '');
+            recordEvent('state', `状态切换：${prevState} → ${newState}`, extra || '');
 
             const orb = document.getElementById('visual-orb');
             const badge = document.getElementById('status-display');
@@ -1193,22 +1925,26 @@
             console.log('[收到消息]', data.type);
 
             if (data.type === 'vad_start') {
+                recordEvent('state', '检测到用户开始说话');
                 // VAD 检测到用户说话 → 停止 AI 音频
                 if (streamingPlayer) streamingPlayer.stop();
                 transitionTo('listening', '检测到语音...');
 
             } else if (data.type === 'vad_end') {
+                recordEvent('state', '用户语音结束，进入处理中');
                 // VAD 检测语音结束 → 进入处理状态
                 transitionTo('processing', '正在处理...');
 
             } else if (data.type === 'asr_result') {
+                recordEvent('asr', '识别到用户回答', data.text);
                 // ASR 识别结果 → 更新思考指示器，保持 processing 状态
-                addMessage(data.text, 'user');
+                appendMessage('user', data.text);
                 if (currentAppState === 'processing') {
                     updateThinkingStatus('📊 已识别回答，正在认知评估...');
                 }
 
             } else if (data.type === 'processing_status') {
+                recordEvent('system', '处理进度更新', data.text || '处理中...');
                 // 🔥 后端处理进度更新 → 保持 processing 状态，更新提示文字
                 if (currentAppState !== 'processing') {
                     transitionTo('processing', data.text || '处理中...');
@@ -1216,12 +1952,16 @@
                     updateThinkingStatus(data.text || '处理中...');
                 }
 
+            } else if (data.type === 'tool_log') {
+                appendToolLog(data.event || {});
+
             } else if (data.type === 'ai_response') {
+                recordEvent('ai', 'AI 生成文本回复', data.text);
                 // AI 文本回复 → 清除等待动画，显示回复文字
                 // 不切到 speaking，等首个 tts_chunk 或 tts_audio 到达才切
                 hideSessionLoading();
                 hideThinking();
-                addMessage(data.text, 'ai', data.emotion);
+                // We use appendMessage directly from message event now, ai_response might be redundant but keeping for compatibility
                 if (currentAppState === 'processing') {
                     updateStatusBadge('🎵', '正在合成语音...', 'var(--status-thinking)');
                 }
@@ -1231,14 +1971,21 @@
                 if (!streamingPlayer) streamingPlayer = new StreamingAudioPlayer();
                 window._ttsStartTime = performance.now();
                 window._ttsChunkCount = 0;
+                ttsChunkMetrics = { count: 0, startedAt: Date.now(), lastSampleRate: null };
+                recordEvent('tts', '语音合成开始', `AudioContext: ${streamingPlayer.audioContext.state}`);
                 console.log('[TTS] 播放器已就绪, AudioContext state:', streamingPlayer.audioContext.state);
 
             } else if (data.type === 'tts_chunk') {
                 window._ttsChunkCount = (window._ttsChunkCount || 0) + 1;
+                ttsChunkMetrics.count += 1;
+                ttsChunkMetrics.lastSampleRate = data.sample_rate || 24000;
                 const elapsed = window._ttsStartTime ? ((performance.now() - window._ttsStartTime) / 1000).toFixed(3) : '?';
                 const chunkSizeKB = data.chunk ? (data.chunk.length / 1024).toFixed(0) : '?';
                 const acState = streamingPlayer ? streamingPlayer.audioContext.state : 'no-player';
                 console.log(`[TTS] 🔊 收到块${window._ttsChunkCount} | t=${elapsed}s | ${chunkSizeKB}KB | AudioCtx=${acState}`);
+                if (ttsChunkMetrics.count === 1 || ttsChunkMetrics.count % 10 === 0) {
+                    upsertAggregateEvent('tts-stream', 'tts', `语音流接收中：${ttsChunkMetrics.count} 个音频块`, `已接收约 ${elapsed}s，采样率 ${ttsChunkMetrics.lastSampleRate}Hz，AudioContext ${acState}`);
+                }
                 
                 // TTS 音频块到达 → 首块时切换到 speaking
                 if (currentAppState !== 'speaking') {
@@ -1251,9 +1998,13 @@
                     console.log(`[TTS] ▶️ 块${window._ttsChunkCount} 已加入播放队列, isPlaying=${streamingPlayer.isPlaying}`);
                 } else {
                     console.error('[TTS] ❌ streamingPlayer 为空！音频丢失');
+                    recordEvent('error', '语音块丢失', 'streamingPlayer 为空');
                 }
 
             } else if (data.type === 'tts_end') {
+                const ttsDuration = ttsChunkMetrics.startedAt ? ((Date.now() - ttsChunkMetrics.startedAt) / 1000).toFixed(1) : '?';
+                removeAggregateEvent('tts-stream');
+                recordEvent('tts', '语音流结束', `共 ${ttsChunkMetrics.count} 个音频块，约 ${ttsDuration}s`);
                 // TTS 流结束 → 延迟切回监听
                 setTimeout(() => {
                     if (!streamingPlayer || !streamingPlayer.isPlaying) {
@@ -1266,6 +2017,7 @@
                 }, (data.duration || 2) * 1000);
 
             } else if (data.type === 'tts_audio') {
+                recordEvent('tts', '收到完整语音音频', `采样率 ${data.sample_rate || '?' }Hz`);
                 // 完整音频到达 → 正式切换到播放状态
                 hideThinking();
                 hideSessionLoading();
@@ -1274,23 +2026,92 @@
                 transitionTo('speaking', '正在播放');
 
             } else if (data.type === 'tts_stop' || data.type === 'stop_tts' || data.type === 'interrupt') {
+                removeAggregateEvent('tts-stream');
+                recordEvent('tts', '语音播放被打断');
                 // 打断信号
                 if (streamingPlayer) streamingPlayer.stop();
                 transitionTo('listening', '已打断');
 
             } else if (data.type === 'update_score') {
+                const total = data?.data?.total_score ?? data?.data?.score ?? '';
+                recordEvent('score', '认知评分已更新', total !== '' ? `当前总分 ${total}` : '');
+                // 先基于当前前端缓存+认知表现计算“本轮变动的维度”，再更新整体MMSE数据
+                const delta = computeMMSEDelta(data.data, data.performance);
                 updateMMSE(data.data);
+                if (delta) {
+                    showMMSEBadge(delta);
+                }
 
             } else if (data.type === 'show_image') {
+                recordEvent('system', '展示题目图片', data.title || data.url || data.image_url || data.image_id || '');
                 showImage(data.url || data.image_url || data.image_id, data.title);
+                // 🔥 闭眼任务展示图片时，自动开启摄像头进行视觉评估
+                const imgId = data.image_id || '';
+                if (imgId === 'close_eyes') {
+                    startVisionTask('language_reading_close_eyes', 5000);
+                }
 
-            } else if (data.type === 'hide_image') {
-                hideImage();
+            } else if (data.type === 'vision_capture') {
+                // 后端请求前端开启摄像头并截图评估
+                const taskId = data.task_id || '';
+                const delay = data.delay || 3000;
+                const mode = data.mode || 'auto';
+                console.log(`[Vision] 收到视觉捕获请求: ${taskId}, mode=${mode}`);
+                startVisionTask(taskId, delay, mode);
 
-            } else if (data.type === 'pong') {
-                // Heartbeat response
+            } else if (data.type === 'vision_stop') {
+                // 后端请求关闭摄像头
+                stopCamera();
 
-            } else if (data.type === 'waiting_for_info') {
+            } else if (data.type === 'drawing_evaluating') {
+                document.getElementById('drawing-evaluating-overlay').classList.add('active');
+                document.getElementById('drawing-status').textContent = data.message || 'AI 正在评估画作...';
+                recordEvent('system', '画作评估中', data.message || '');
+
+            } else if (data.type === 'drawing_result') {
+                document.getElementById('drawing-evaluating-overlay').classList.remove('active');
+                if (data.error) {
+                    document.getElementById('drawing-status').textContent = '❌ 评估失败: ' + data.error;
+                    document.getElementById('drawing-submit-btn').disabled = false;
+                    recordEvent('system', '画图评估失败', data.error);
+                } else {
+                    const r = data.result || {};
+                    const ok = r.is_correct === true ? '✅ 正确' : r.is_correct === false ? '❌ 不正确' : '❓ 无法判断';
+                    document.getElementById('drawing-status').textContent = `评估完成：${ok}（${r.quality_level || ''}）`;
+                    recordEvent('system', '画图评估完成', `${ok} ${r.evaluation_detail || ''}`);
+                    // 延迟关闭画板，让患者看到结果
+                    setTimeout(hideDrawingModal, 2500);
+                }
+
+            } else if (data.type === 'message') {
+                const isUser = data.role === 'user';
+                hideThinking();
+                // 移除气泡里的 evalInfo，只显示文本和情绪
+                appendMessage(
+                    isUser ? 'user' : 'ai', 
+                    data.text, 
+                    data.emotion || null
+                );
+                recordEvent('chat', isUser ? '用户' : 'AI', data.text);
+                
+                // 如果有评估结果，更新 Orb 下方的显示
+                if (data.evalInfo) {
+                    updateOrbEvalBadge(data.evalInfo);
+                }
+
+            } else if (data.type === 'eval_result') {
+                // 异步推送的评估结果
+                hideThinking();
+                console.log('[评估] 收到异步评估结果:', data.evalInfo);
+                recordEvent('eval', '评估完成', `${data.evalInfo.quality_level} (${data.evalInfo.score}/${data.evalInfo.max_score}分)`);
+                
+                // 更新 Orb 下方的评估显示
+                if (data.evalInfo) {
+                    updateOrbEvalBadge(data.evalInfo);
+                }
+
+            } else if (data.type === 'image_display') {
+                recordEvent('system', '等待补充患者信息');
                 if (!sessionStarted) {
                     // 首次连接提示用户填写信息并打开设置面板
                     toggleDrawer();
@@ -1298,11 +2119,13 @@
 
             } else if (data.type === 'speaker_sample_added') {
                 console.log('[声纹] 样本添加:', data.message);
+                recordEvent('speaker', '声纹样本已添加', data.message);
                 updateSampleDots(data.current, data.needed);
                 document.getElementById('enroll-status').textContent = data.message;
 
             } else if (data.type === 'speaker_enrolled') {
                 console.log('[声纹] 注册成功:', data.message);
+                recordEvent('speaker', '声纹注册完成', data.message);
                 updateSampleDots(data.current || 8, data.needed || 8);
                 document.getElementById('enroll-status').textContent = '✅ 注册完成！请输入名称并保存';
                 document.getElementById('enroll-btn').disabled = true;
@@ -1312,6 +2135,7 @@
 
             } else if (data.type === 'speaker_reset') {
                 console.log('[声纹] 已重置');
+                recordEvent('speaker', '声纹录制已重置');
                 updateSampleDots(0, 8);
                 document.getElementById('enroll-status').textContent = '';
                 document.getElementById('enroll-btn').disabled = false;
@@ -1325,20 +2149,24 @@
             } else if (data.type === 'speaker_verify_status') {
                 const enabled = data.enabled;
                 console.log(`[声纹] 验证状态更新：${enabled ? '开启' : '关闭'}`);
+                recordEvent('speaker', `声纹验证已${enabled ? '开启' : '关闭'}`);
                 document.getElementById('speaker-verify-toggle').checked = enabled;
                 document.getElementById('verify-status-text').textContent = enabled ? '开启' : '关闭';
 
             } else if (data.type === 'speaker_error') {
                 console.error('[声纹] 错误:', data.message);
+                recordEvent('error', '声纹处理错误', data.message);
                 document.getElementById('enroll-status').textContent = '❗ ' + data.message;
 
             } else if (data.type === 'speaker_saved') {
                 console.log('[声纹] 已保存:', data.name);
+                recordEvent('speaker', '声纹已保存', data.name || data.message);
                 document.getElementById('enroll-status').textContent = data.message;
                 refreshSpeakersList();
 
             } else if (data.type === 'speaker_loaded') {
                 console.log('[声纹] 已加载:', data.name);
+                recordEvent('speaker', '声纹已加载', data.name || data.message);
                 document.getElementById('enroll-status').textContent = data.message;
                 document.getElementById('enroll-btn').disabled = true;
                 document.getElementById('enroll-btn').textContent = '✅ 已加载';
@@ -1362,7 +2190,150 @@
                     select.appendChild(option);
                 });
                 console.log('[声纹] 已保存的声纹:', data.speakers);
+                recordEvent('speaker', '已刷新声纹列表', `共 ${(data.speakers || []).length} 个`);
+
+            } else if (data.type === 'speaker_rejected') {
+                console.log('[声纹] 非目标说话人:', data.message);
+                recordEvent('speaker', '非目标说话人', data.message);
+                showSpeakerRejectedToast(data.similarity);
             }
+        }
+
+        function formatEventTime(date = new Date()) {
+            return date.toLocaleTimeString('zh-CN', { hour12: false });
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function getEventLabel(type) {
+            const labels = {
+                state: '状态',
+                asr: '识别',
+                ai: '回复',
+                tts: '语音',
+                score: '评分',
+                speaker: '声纹',
+                system: '系统',
+                error: '错误'
+            };
+            return labels[type] || '事件';
+        }
+
+        function recordEvent(type, message, detail = '', options = {}) {
+            return;
+        }
+
+        function upsertAggregateEvent(id, type, message, detail = '') {
+            recordEvent(type, message, detail, { id, aggregate: true });
+        }
+
+        function removeAggregateEvent(id) {
+            const next = eventLogs.filter(item => item.id !== id);
+            if (next.length !== eventLogs.length) {
+                eventLogs = next;
+                renderEventLogs();
+            }
+        }
+
+        function renderEventLogs() {
+            const list = document.getElementById('event-log-list');
+            const summary = document.getElementById('event-log-summary');
+            if (!list || !summary) return;
+
+            if (!eventLogs.length) {
+                list.innerHTML = '<div class="event-log-empty">暂无工具调用日志</div>';
+                summary.textContent = '这里展示每次 LLM 生成时调用的工具、输入、输出和耗时';
+                return;
+            }
+
+            const visibleLogs = eventLogs.slice(-20);
+            list.innerHTML = visibleLogs.map(item => `
+                <div class="event-item">
+                    <div class="event-time">${escapeHtml(item.time)}</div>
+                    <div class="event-tag ${escapeHtml(item.type || 'system')}">${escapeHtml(item.label || getEventLabel(item.type || 'system'))}</div>
+                    <div class="event-main">
+                        <div class="event-message">${escapeHtml(item.message)}</div>
+                        ${item.detail ? `<div class="event-detail">${escapeHtml(item.detail)}</div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            const latest = eventLogs[eventLogs.length - 1];
+            summary.textContent = `最近 ${visibleLogs.length} 条工具日志 · 最新：${latest.message}`;
+
+            if (!eventLogPaused) {
+                const body = document.querySelector('#event-log-panel .event-log-body');
+                if (body) body.scrollTop = body.scrollHeight;
+            }
+        }
+
+        function toggleEventLogPanel() {
+            document.getElementById('event-log-panel').classList.toggle('collapsed');
+        }
+
+        function toggleEventLogPause(event) {
+            event.stopPropagation();
+            eventLogPaused = !eventLogPaused;
+            const btn = document.getElementById('event-log-pause-btn');
+            btn.textContent = eventLogPaused ? '恢复滚动' : '暂停滚动';
+            btn.classList.toggle('active', eventLogPaused);
+        }
+
+        function clearEventLog(event) {
+            event.stopPropagation();
+            eventLogs = [];
+            renderEventLogs();
+        }
+
+        function summarizeMap(data) {
+            if (!data || typeof data !== 'object') return '';
+            return Object.entries(data).map(([key, value]) => `${key}: ${value}`).join(' | ');
+        }
+
+        function appendToolLog(event) {
+            const phase = event.phase || 'log';
+            const toolName = event.tool_name || 'Tool';
+            const icon = event.icon || '🔧';
+            const time = event.timestamp || formatEventTime();
+
+            let message = `${icon} ${toolName}`;
+            let detail = '';
+
+            if (phase === 'start') {
+                message = `${icon} ${toolName} 开始调用`;
+                detail = summarizeMap(event.inputs);
+            } else if (phase === 'end') {
+                message = `${icon} ${toolName} 调用完成`;
+                const outputText = summarizeMap(event.outputs);
+                detail = [outputText, event.elapsed_s !== undefined ? `耗时: ${event.elapsed_s}s` : ''].filter(Boolean).join(' | ');
+            } else if (phase === 'step') {
+                message = `${icon} ${toolName} 执行步骤`;
+                detail = event.message || '';
+            } else {
+                message = `${icon} ${toolName} 日志`;
+                detail = event.message || '';
+            }
+
+            eventLogs.push({
+                id: event.log_id ? `${event.log_id}-${phase}-${Date.now()}` : `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                type: 'system',
+                label: toolName,
+                message,
+                detail,
+                time
+            });
+
+            if (eventLogs.length > EVENT_LOG_LIMIT) {
+                eventLogs = eventLogs.slice(-EVENT_LOG_LIMIT);
+            }
+            renderEventLogs();
         }
 
         // --- 🎵 Robust Streaming Audio Player ---
@@ -1386,6 +2357,7 @@
                 this.activeSources = [];
                 this.isPlaying = false;
                 console.log('[AudioPlayer] 初始化, AudioContext state:', this.audioContext.state);
+                recordEvent('tts', '音频播放器已初始化', `AudioContext: ${this.audioContext.state}`);
             }
 
             addChunk(chunkBase64, sampleRate = 24000) {
@@ -1406,6 +2378,7 @@
                     this.playBuffer(audioBuffer);
                 } catch (e) {
                     console.error('[AudioPlayer] 解码音频失败:', e);
+                    recordEvent('error', '音频解码失败', e.message || String(e));
                 }
             }
 
@@ -1442,6 +2415,7 @@
                 this.nextStartTime = this.audioContext.currentTime;
                 this.isPlaying = false;
                 console.log('[AudioPlayer] 已停止播放');
+                recordEvent('tts', '音频播放已停止');
                 transitionTo('listening');
             }
 
@@ -1455,6 +2429,7 @@
             if (streamingPlayer) streamingPlayer.stop();
             if (ws) ws.send(JSON.stringify({ type: 'interrupt' }));
             console.log("Interrupt sent");
+            recordEvent('tts', '已发送打断指令');
         }
 
         // --- 🎤 Robust Recording (AudioWorklet) ---
@@ -1503,14 +2478,16 @@
 
                     audioWorkletNode.port.onmessage = (e) => {
                         if (!isRecording) return;
-                        // Convert Float32 to Int16
+                        // 🔥 v1优化: 直接发送二进制 Int16 buffer，替代 JSON 序列化
+                        // 原: JSON.stringify({type:'audio', data: Array.from(int16Array)}) → ~50KB JSON
+                        // 新: ws.send(int16Array.buffer) → 8KB 二进制，带宽-84%, CPU大幅降低
                         const floatData = e.data;
                         const int16Array = new Int16Array(floatData.length);
                         for (let i = 0; i < floatData.length; i++) {
                             int16Array[i] = Math.max(-32768, Math.min(32767, floatData[i] * 32768));
                         }
                         if (ws && ws.readyState === WebSocket.OPEN) {
-                            ws.send(JSON.stringify({ type: 'audio', data: Array.from(int16Array) }));
+                            ws.send(int16Array.buffer);  // 二进制发送
                         }
                     };
 
@@ -1520,9 +2497,11 @@
                     isRecording = true;
                     document.getElementById('mic-btn').classList.add('recording');
                     transitionTo('listening');
+                    recordEvent('system', '麦克风录音已启动');
 
                 } catch (err) {
                     console.error(err);
+                    recordEvent('error', '麦克风启动失败', err.message || String(err));
                     alert("麦克风错误: " + err.message);
                 }
             } else {
@@ -1530,6 +2509,7 @@
                 isRecording = false;
                 if (audioContext) audioContext.close();
                 document.getElementById('mic-btn').classList.remove('recording');
+                recordEvent('system', '麦克风录音已停止');
                 // 🔥 统一: 进入处理状态（含思考动画）
                 transitionTo('processing', '正在处理...');
                 ws.send(JSON.stringify({ type: 'stop_recording' }));
@@ -1542,13 +2522,15 @@
             if (!text) return;
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 alert('未连接到服务器');
+                recordEvent('error', '文本发送失败', 'WebSocket 未连接');
                 return;
             }
-            addMessage(text, 'user');
+            appendMessage('user', text);
+            recordEvent('asr', '用户发送文本消息', text);
             ws.send(JSON.stringify({ type: 'text', data: text }));
             input.value = '';
             // 🔥 统一: 进入处理状态（含思考动画）
-            transitionTo('processing', '正在思考...');
+            transitionTo('processing', '正在处理...');
         }
 
         // --- UI Helpers ---
@@ -1569,7 +2551,7 @@
             transitionTo(state === 'connected' ? 'idle' : state, text);
         }
 
-        function addMessage(text, role, emotionCategory) {
+        function appendMessage(role, text, emotionCategory = null) {
             const stream = document.getElementById('conversation-stream');
             const div = document.createElement('div');
             div.className = `message-row ${role}`;
@@ -1588,6 +2570,72 @@
             stream.appendChild(div);
 
             setTimeout(() => { stream.scrollTop = stream.scrollHeight; }, 100);
+        }
+
+        let evalBadgeTimeout = null;
+
+        function updateOrbEvalBadge(evalInfo) {
+            const badge = document.getElementById('orb-eval-badge');
+            if (!badge) return;
+            
+            // 清除之前的定时器
+            if (evalBadgeTimeout) {
+                clearTimeout(evalBadgeTimeout);
+                evalBadgeTimeout = null;
+            }
+
+            if (!evalInfo) {
+                badge.style.opacity = '0';
+                badge.style.transform = 'translateY(10px)';
+                return;
+            }
+
+            let badgeClass = 'pending';
+            let badgeText = '评估中...';
+            let icon = '⏳';
+            
+            if (evalInfo.is_chat) {
+                badgeClass = 'chat';
+                badgeText = '闲聊过渡';
+                icon = '💬';
+            } else if (evalInfo.quality_level === 'pending') {
+                badgeClass = 'pending';
+                badgeText = '后台评估中';
+                icon = '🔄';
+            } else {
+                const isCorrect = evalInfo.is_correct || evalInfo.quality_level === 'excellent' || evalInfo.quality_level === 'good';
+                badgeClass = isCorrect ? 'correct' : 'incorrect';
+                icon = isCorrect ? '✅' : '❌';
+                
+                let scoreStr = '';
+                if (evalInfo.score !== undefined && evalInfo.max_score !== undefined) {
+                    scoreStr = ` ${evalInfo.score}/${evalInfo.max_score}分`;
+                }
+                
+                const qMap = { 'excellent': '完美', 'good': '基本对', 'fair': '部分对', 'poor': '错误' };
+                const qText = qMap[evalInfo.quality_level] || evalInfo.quality_level;
+                badgeText = `${icon} ${qText}${scoreStr}`;
+            }
+
+            badge.className = `eval-label ${badgeClass}`;
+            badge.innerHTML = badgeText;
+            if (evalInfo.detail) {
+                badge.title = evalInfo.detail;
+            } else {
+                badge.removeAttribute('title');
+            }
+
+            // 显示动画
+            badge.style.opacity = '1';
+            badge.style.transform = 'translate(-50%, -50%) scale(1)';
+            
+            // 只有处于 pending 时才持续显示，其他情况显示 5 秒后消失
+            if (evalInfo.quality_level !== 'pending') {
+                evalBadgeTimeout = setTimeout(() => {
+                    badge.style.opacity = '0';
+                    badge.style.transform = 'translate(-50%, -50%) scale(0.9)';
+                }, 5000);
+            }
         }
 
         // ==========================================
@@ -1733,6 +2781,7 @@
             // 这样后续 tts_chunk 到达时 AudioContext 已经是 running 状态
             const ctx = getSharedAudioContext();
             console.log('[Session] 预激活 AudioContext, state:', ctx.state);
+            recordEvent('system', '会话已启动', `${name}，AudioContext: ${ctx.state}`);
 
             // 🔥 显示开场白等待动画
             transitionTo('session_loading', '正在准备问候语...');
@@ -1750,6 +2799,7 @@
 
                 toggleDrawer(); // Show results
                 addMessage("系统: 会话已结束。可在右侧导出报告或重新开始。", "ai");
+                recordEvent('system', '会话已结束');
             }
         }
 
@@ -1789,14 +2839,11 @@
             }
 
             // ④ 维度定义（前端展示用）
-            const dimensions = [
-                { id: 'orientation', label: '定向力', max: 10 },
-                { id: 'registration', label: '即时记忆', max: 3 },
-                { id: 'attention_calculation', label: '注意与计算', max: 5 },
-                { id: 'recall', label: '回忆能力', max: 3 },
-                { id: 'language', label: '语言能力', max: 8 },
-                { id: 'copy', label: '视空间', max: 1 }
-            ];
+            const dimensions = Object.entries(mmseDimensionMeta).map(([id, meta]) => ({
+                id,
+                label: meta.label,
+                max: meta.max
+            }));
 
             // ⑤ 重新渲染维度列表
             const list = document.getElementById('mmse-dimensions');
@@ -1877,17 +2924,23 @@
                 return ref;
             }
 
-            // 按 image_id 映射到静态资源
+            // 按 image_id 映射到 API 端点（比 StaticFiles 更可靠）
             const knownImageIds = new Set(['watch', 'pencil', 'close_eyes', 'pentagons']);
             if (knownImageIds.has(ref)) {
-                return `/static/mmse_images/${ref}.png`;
+                return `/api/mmse-image/${ref}`;
             }
 
-            // 容错：未知 id 也按 png 路径尝试
-            return `/static/mmse_images/${ref}.png`;
+            // 容错：未知 id 也按 API 路径尝试
+            return `/api/mmse-image/${ref}`;
         }
 
         function showImage(imageRef, title) {
+            const rawRef = String(imageRef || '').trim();
+            // 五边形临摹任务 → 打开画板而不是只显示图片
+            if (rawRef === 'pentagons' || rawRef.includes('pentagons')) {
+                showDrawingModal();
+                return;
+            }
             const url = resolveImageUrl(imageRef);
             if (!url) {
                 console.warn('[ImageDisplay] 无有效图片地址:', imageRef);
@@ -1900,6 +2953,600 @@
 
         function hideImage() {
             document.getElementById('image-modal').style.display = 'none';
+        }
+
+        // ===== 🎨 Drawing Canvas (数位板) =====
+        let _drawingCtx = null;
+        let _drawingHistory = [];  // 撤销栈（每笔保存快照）
+        let _drawingActive = false;
+        let _drawingLastX = 0;
+        let _drawingLastY = 0;
+
+        function _initDrawingCanvas() {
+            const canvas = document.getElementById('drawing-canvas');
+            if (!canvas) return;
+            // 将 CSS 尺寸同步为像素分辨率（支持高 DPI）
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            _drawingCtx = canvas.getContext('2d');
+            _drawingCtx.scale(dpr, dpr);
+            _drawingCtx.fillStyle = '#ffffff';
+            _drawingCtx.fillRect(0, 0, rect.width, rect.height);
+            _drawingHistory = [];
+            _saveDrawingSnapshot();
+
+            // PointerEvents — 支持数位板压感、鼠标、触控
+            canvas.addEventListener('pointerdown', _onDrawStart, { passive: false });
+            canvas.addEventListener('pointermove', _onDrawMove, { passive: false });
+            canvas.addEventListener('pointerup', _onDrawEnd, { passive: false });
+            canvas.addEventListener('pointerleave', _onDrawEnd, { passive: false });
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+        }
+
+        function _getPos(e) {
+            const canvas = document.getElementById('drawing-canvas');
+            const rect = canvas.getBoundingClientRect();
+            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        }
+
+        function _onDrawStart(e) {
+            e.preventDefault();
+            _drawingActive = true;
+            const pos = _getPos(e);
+            _drawingLastX = pos.x;
+            _drawingLastY = pos.y;
+            _drawingCtx.beginPath();
+            _drawingCtx.arc(pos.x, pos.y, _getLineWidth(e) / 2, 0, Math.PI * 2);
+            _drawingCtx.fillStyle = document.getElementById('drawing-color').value;
+            _drawingCtx.fill();
+        }
+
+        function _onDrawMove(e) {
+            if (!_drawingActive) return;
+            e.preventDefault();
+            const pos = _getPos(e);
+            const lw = _getLineWidth(e);
+            _drawingCtx.beginPath();
+            _drawingCtx.moveTo(_drawingLastX, _drawingLastY);
+            _drawingCtx.lineTo(pos.x, pos.y);
+            _drawingCtx.strokeStyle = document.getElementById('drawing-color').value;
+            _drawingCtx.lineWidth = lw;
+            _drawingCtx.lineCap = 'round';
+            _drawingCtx.lineJoin = 'round';
+            _drawingCtx.stroke();
+            _drawingLastX = pos.x;
+            _drawingLastY = pos.y;
+        }
+
+        function _onDrawEnd(e) {
+            if (!_drawingActive) return;
+            _drawingActive = false;
+            _saveDrawingSnapshot();
+        }
+
+        function _getLineWidth(e) {
+            const base = parseInt(document.getElementById('drawing-size').value) || 4;
+            // 数位板压感：pressure 范围 0~1，0.5 为默认
+            const pressure = (e.pressure !== undefined && e.pressure > 0) ? e.pressure : 0.5;
+            return base * (0.4 + pressure * 1.2);
+        }
+
+        function _saveDrawingSnapshot() {
+            const canvas = document.getElementById('drawing-canvas');
+            if (!canvas) return;
+            _drawingHistory.push(canvas.toDataURL());
+            if (_drawingHistory.length > 30) _drawingHistory.shift();
+        }
+
+        function drawingUndo() {
+            if (_drawingHistory.length <= 1) return;
+            _drawingHistory.pop();
+            const canvas = document.getElementById('drawing-canvas');
+            const img = new Image();
+            img.onload = () => {
+                const rect = canvas.getBoundingClientRect();
+                _drawingCtx.clearRect(0, 0, rect.width, rect.height);
+                _drawingCtx.drawImage(img, 0, 0, rect.width, rect.height);
+            };
+            img.src = _drawingHistory[_drawingHistory.length - 1];
+        }
+
+        function drawingClear() {
+            const canvas = document.getElementById('drawing-canvas');
+            const rect = canvas.getBoundingClientRect();
+            _drawingCtx.fillStyle = '#ffffff';
+            _drawingCtx.fillRect(0, 0, rect.width, rect.height);
+            _drawingHistory = [];
+            _saveDrawingSnapshot();
+            document.getElementById('drawing-status').textContent = '画布已清除，重新临摹吧';
+        }
+
+        function showDrawingModal() {
+            document.getElementById('drawing-modal').classList.add('open');
+            document.getElementById('drawing-status').textContent = '在右侧画布上临摹图形，完成后点击「提交」';
+            document.getElementById('drawing-submit-btn').disabled = false;
+            document.getElementById('drawing-evaluating-overlay').classList.remove('active');
+            // 延迟初始化，等待 DOM 渲染完成以获取正确的 rect
+            setTimeout(_initDrawingCanvas, 80);
+        }
+
+        function hideDrawingModal() {
+            document.getElementById('drawing-modal').classList.remove('open');
+            const canvas = document.getElementById('drawing-canvas');
+            if (canvas) {
+                canvas.removeEventListener('pointerdown', _onDrawStart);
+                canvas.removeEventListener('pointermove', _onDrawMove);
+                canvas.removeEventListener('pointerup', _onDrawEnd);
+                canvas.removeEventListener('pointerleave', _onDrawEnd);
+            }
+        }
+
+        function drawingSubmit() {
+            const canvas = document.getElementById('drawing-canvas');
+            if (!canvas) return;
+            const imageData = canvas.toDataURL('image/png');
+            console.log('[Drawing] 提交画作，大小:', Math.round(imageData.length / 1024), 'KB');
+
+            document.getElementById('drawing-submit-btn').disabled = true;
+            document.getElementById('drawing-evaluating-overlay').classList.add('active');
+            document.getElementById('drawing-status').textContent = 'AI 正在评估，请稍候...';
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'drawing_submit', image: imageData }));
+            } else {
+                document.getElementById('drawing-status').textContent = '❌ 连接断开，请刷新页面重试';
+                document.getElementById('drawing-submit-btn').disabled = false;
+            }
+        }
+
+        // ===== 📹 Camera & Hybrid Vision Evaluation (Video + Multi-Frame) =====
+        let cameraStream = null;
+        let currentVisionTaskId = null;
+        let visionCaptureTimer = null;
+        let _videoRecorder = null;
+        let _videoChunks = [];
+
+        // 视觉任务配置
+        // duration: 录像时长；frames: 截帧数（视频模式可能不可用，多帧是主要方案）
+        // 三步动作需要15s+8帧覆盖完整序列（抬手→摸耳→放下）
+        const VISION_TASK_CONFIG = {
+            'language_reading_close_eyes': { duration: 8000, frames: 4 },
+            'language_3step_action':       { duration: 15000, frames: 8 },
+            'copy_pentagons':              { duration: 8000, frames: 4 },
+        };
+        const DEFAULT_VISION_CONFIG = { duration: 8000, frames: 4 };
+
+        async function startCamera() {
+            if (cameraStream) return;
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: 'user' }
+                });
+                const video = document.getElementById('camera-preview');
+                video.srcObject = cameraStream;
+                document.getElementById('camera-container').classList.add('active');
+                console.log('[Camera] ✅ 摄像头已开启');
+            } catch (e) {
+                console.error('[Camera] ❌ 无法打开摄像头:', e);
+                cameraStream = null;
+            }
+        }
+
+        function stopCamera() {
+            if (_videoRecorder && _videoRecorder.state === 'recording') {
+                _videoRecorder.stop();
+            }
+            _videoRecorder = null;
+            _videoChunks = [];
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+            document.getElementById('camera-container').classList.remove('active');
+            currentVisionTaskId = null;
+            if (visionCaptureTimer) {
+                clearTimeout(visionCaptureTimer);
+                visionCaptureTimer = null;
+            }
+            // 清理手动录制状态
+            _manualRecording = false;
+            _manualTaskId = null;
+            _hideRecordControl();
+            console.log('[Camera] 📴 摄像头已关闭');
+        }
+
+        // 从摄像头捕获一帧 JPEG base64
+        function captureFrame() {
+            const video = document.getElementById('camera-preview');
+            if (!video.srcObject || video.videoWidth === 0) return null;
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            return canvas.toDataURL('image/jpeg', 0.85);
+        }
+
+        // 同时录视频 + 抽帧，返回 { videoBase64, mimeType, frames }
+        function hybridCapture(durationMs, numFrames) {
+            return new Promise((resolve) => {
+                const frames = [];
+                let videoBase64 = null;
+                let mimeType = '';
+                let videoReady = false;
+                let framesReady = false;
+
+                function tryResolve() {
+                    if (videoReady && framesReady) {
+                        resolve({ videoBase64, mimeType, frames });
+                    }
+                }
+
+                // --- 录视频 ---
+                _videoChunks = [];
+                mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+                    ? 'video/webm;codecs=vp8'
+                    : (MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : 'video/mp4');
+                try {
+                    _videoRecorder = new MediaRecorder(cameraStream, {
+                        mimeType,
+                        videoBitsPerSecond: 800000  // 800kbps
+                    });
+                    _videoRecorder.ondataavailable = (e) => {
+                        if (e.data && e.data.size > 0) _videoChunks.push(e.data);
+                    };
+                    _videoRecorder.onstop = () => {
+                        const blob = new Blob(_videoChunks, { type: mimeType });
+                        if (blob.size > 500) {  // 有效视频
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                videoBase64 = reader.result;
+                                console.log(`[Video] ✅ 录制完成: ${(blob.size/1024).toFixed(0)}KB, ${mimeType}`);
+                                videoReady = true;
+                                tryResolve();
+                            };
+                            reader.onerror = () => { videoReady = true; tryResolve(); };
+                            reader.readAsDataURL(blob);
+                        } else {
+                            console.warn('[Video] ⚠️ 录制文件过小，跳过');
+                            videoReady = true;
+                            tryResolve();
+                        }
+                    };
+                    _videoRecorder.onerror = () => { videoReady = true; tryResolve(); };
+                    _videoRecorder.start();
+                    console.log(`[Video] 🔴 开始录制 (${durationMs}ms, ${mimeType})`);
+
+                    setTimeout(() => {
+                        if (_videoRecorder && _videoRecorder.state === 'recording') {
+                            _videoRecorder.stop();
+                        }
+                    }, durationMs);
+                } catch (e) {
+                    console.warn('[Video] ⚠️ MediaRecorder不可用:', e);
+                    videoReady = true;
+                    tryResolve();
+                }
+
+                // --- 同时抽帧 ---
+                const interval = Math.floor(durationMs / numFrames);
+                let count = 0;
+                console.log(`[Frames] 📸 同步抽帧: ${numFrames}帧, 间隔${interval}ms`);
+                const timer = setInterval(() => {
+                    const frame = captureFrame();
+                    if (frame) frames.push(frame);
+                    count++;
+                    if (count >= numFrames) {
+                        clearInterval(timer);
+                        console.log(`[Frames] ✅ 抽帧完成: ${frames.length}帧`);
+                        framesReady = true;
+                        tryResolve();
+                    }
+                }, interval);
+            });
+        }
+
+        async function triggerVisionEvaluation(taskId, context) {
+            if (!cameraStream) {
+                console.warn('[Vision] 摄像头未开启，无法评估');
+                return null;
+            }
+            const statusEl = document.getElementById('camera-status');
+            const labelEl = document.getElementById('camera-label');
+
+            const cfg = VISION_TASK_CONFIG[taskId] || DEFAULT_VISION_CONFIG;
+            statusEl.className = 'recording';
+            statusEl.textContent = '🔴';
+            labelEl.textContent = `录像+观察中 (${cfg.duration/1000}s)...`;
+
+            try {
+                const { videoBase64, mimeType, frames } = await hybridCapture(cfg.duration, cfg.frames);
+
+                if (!videoBase64 && frames.length === 0) {
+                    statusEl.className = '';
+                    statusEl.textContent = '📹';
+                    labelEl.textContent = '摄像头监测中';
+                    return null;
+                }
+
+                statusEl.className = 'evaluating';
+                statusEl.textContent = '🔍';
+                labelEl.textContent = '正在AI视频分析...';
+
+                // 构建请求：视频+帧都发，后端决定用哪个
+                const payload = { task_id: taskId, context: context || '' };
+                if (videoBase64) payload.video = videoBase64;
+                if (videoBase64) payload.mime_type = mimeType;
+                if (frames.length > 0) payload.frames = frames;
+
+                const resp = await fetch('/api/vision-evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await resp.json();
+                console.log('[Vision] 评估结果:', result);
+
+                // 通过 WebSocket 将视觉评估结果发送给后端 Agent
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'vision_eval_result',
+                        task_id: taskId,
+                        result: result
+                    }));
+                }
+
+                statusEl.className = '';
+                statusEl.textContent = result.is_correct ? '✅' : (result.is_correct === false ? '❌' : '📹');
+                labelEl.textContent = result.is_correct ? '动作正确' : (result.is_correct === false ? '未检测到' : '摄像头监测中');
+
+                setTimeout(() => {
+                    statusEl.textContent = '📹';
+                    labelEl.textContent = '摄像头监测中';
+                }, 3000);
+
+                return result;
+            } catch (e) {
+                console.error('[Vision] 评估失败:', e);
+                statusEl.className = '';
+                statusEl.textContent = '📹';
+                labelEl.textContent = '摄像头监测中';
+                return null;
+            }
+        }
+
+        // ========== 手动录制相关状态 ==========
+        let _manualTaskId = null;
+        let _manualRecording = false;
+        let _manualTimerInterval = null;
+        let _manualStartTime = 0;
+        let _manualFrames = [];
+        let _manualFrameTimer = null;
+
+        function _showRecordControl(taskId) {
+            const TASK_LABELS = {
+                'language_3step_action': '请完成三步动作，准备好后点击开始',
+            };
+            document.getElementById('rec-task-label').textContent =
+                TASK_LABELS[taskId] || '准备好后点击开始录制';
+            document.getElementById('rec-timer').textContent = '00:00';
+            document.getElementById('rec-timer').classList.remove('recording');
+            document.getElementById('btn-rec-start').style.display = '';
+            document.getElementById('btn-rec-stop').style.display = 'none';
+            document.getElementById('record-control').classList.add('active');
+        }
+
+        function _hideRecordControl() {
+            document.getElementById('record-control').classList.remove('active');
+            if (_manualTimerInterval) {
+                clearInterval(_manualTimerInterval);
+                _manualTimerInterval = null;
+            }
+            if (_manualFrameTimer) {
+                clearInterval(_manualFrameTimer);
+                _manualFrameTimer = null;
+            }
+        }
+
+        function _updateRecTimer() {
+            const elapsed = Math.floor((Date.now() - _manualStartTime) / 1000);
+            const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+            const ss = String(elapsed % 60).padStart(2, '0');
+            document.getElementById('rec-timer').textContent = `${mm}:${ss}`;
+        }
+
+        // 用户点击"开始录制"
+        function manualRecordStart() {
+            if (!cameraStream || _manualRecording) return;
+
+            _manualRecording = true;
+            _manualFrames = [];
+            _manualStartTime = Date.now();
+
+            // UI 切换
+            document.getElementById('btn-rec-start').style.display = 'none';
+            document.getElementById('btn-rec-stop').style.display = '';
+            document.getElementById('rec-timer').classList.add('recording');
+            document.getElementById('rec-task-label').innerHTML =
+                '<span class="rec-dot"></span>录制中...';
+            document.getElementById('camera-status').className = 'recording';
+            document.getElementById('camera-status').textContent = '🔴';
+            document.getElementById('camera-label').textContent = '录制中';
+
+            // 启动计时
+            _manualTimerInterval = setInterval(_updateRecTimer, 500);
+
+            // 启动 MediaRecorder
+            _videoChunks = [];
+            const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+                ? 'video/webm;codecs=vp8'
+                : (MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : 'video/mp4');
+            try {
+                _videoRecorder = new MediaRecorder(cameraStream, {
+                    mimeType, videoBitsPerSecond: 800000
+                });
+                _videoRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) _videoChunks.push(e.data);
+                };
+                _videoRecorder.start();
+                console.log(`[ManualRec] 🔴 开始录制 (${mimeType})`);
+            } catch (e) {
+                console.warn('[ManualRec] MediaRecorder不可用:', e);
+            }
+
+            // 同步抽帧（每2秒一帧）
+            _manualFrameTimer = setInterval(() => {
+                const frame = captureFrame();
+                if (frame) _manualFrames.push(frame);
+            }, 2000);
+        }
+
+        // 用户点击"结束录制"
+        async function manualRecordStop() {
+            if (!_manualRecording) return;
+            _manualRecording = false;
+            const taskId = _manualTaskId;
+
+            // 停止计时和抽帧
+            if (_manualTimerInterval) { clearInterval(_manualTimerInterval); _manualTimerInterval = null; }
+            if (_manualFrameTimer) { clearInterval(_manualFrameTimer); _manualFrameTimer = null; }
+
+            // 最后再截一帧
+            const lastFrame = captureFrame();
+            if (lastFrame) _manualFrames.push(lastFrame);
+
+            // UI 切换到"分析中"
+            document.getElementById('btn-rec-stop').disabled = true;
+            document.getElementById('rec-task-label').textContent = '正在AI分析视频...';
+            document.getElementById('camera-status').className = 'evaluating';
+            document.getElementById('camera-status').textContent = '🔍';
+            document.getElementById('camera-label').textContent = 'AI分析中...';
+
+            // 停止 MediaRecorder 并等待数据
+            let videoBase64 = null;
+            let mimeType = '';
+            if (_videoRecorder && _videoRecorder.state === 'recording') {
+                mimeType = _videoRecorder.mimeType;
+                await new Promise((resolve) => {
+                    _videoRecorder.onstop = () => resolve();
+                    _videoRecorder.stop();
+                });
+                const blob = new Blob(_videoChunks, { type: mimeType });
+                if (blob.size > 500) {
+                    videoBase64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.onerror = () => resolve(null);
+                        reader.readAsDataURL(blob);
+                    });
+                    console.log(`[ManualRec] ✅ 视频 ${(blob.size/1024).toFixed(0)}KB`);
+                }
+            }
+
+            console.log(`[ManualRec] 结束录制: 视频=${videoBase64 ? '有' : '无'}, 帧=${_manualFrames.length}`);
+
+            // 发送到评估 API
+            try {
+                const payload = { task_id: taskId, context: '' };
+                if (videoBase64) { payload.video = videoBase64; payload.mime_type = mimeType; }
+                if (_manualFrames.length > 0) {
+                    payload.frames = _manualFrames.map(f =>
+                        f.startsWith('data:') ? f.split(',')[1] : f
+                    );
+                }
+
+                const resp = await fetch('/api/vision-evaluate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await resp.json();
+                console.log('[ManualRec] 评估结果:', result);
+
+                // 通过 WebSocket 将结果发送给后端 Agent
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'vision_eval_result',
+                        task_id: taskId,
+                        result: result
+                    }));
+                }
+
+                // 显示结果
+                document.getElementById('camera-status').className = '';
+                document.getElementById('camera-status').textContent = result.is_correct ? '✅' : '❌';
+                document.getElementById('camera-label').textContent =
+                    result.is_correct ? '动作正确' : '动作不完整';
+                document.getElementById('rec-task-label').textContent =
+                    result.is_correct ? '✅ 评估完成：动作正确' : '❌ 评估完成：' + (result.evaluation_detail || '动作不完整');
+                document.getElementById('btn-rec-stop').style.display = 'none';
+
+            } catch (e) {
+                console.error('[ManualRec] 评估失败:', e);
+                document.getElementById('rec-task-label').textContent = '❌ 评估失败';
+                // 通知后端
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'vision_eval_result',
+                        task_id: taskId,
+                        result: { success: false, error: e.message, is_correct: null }
+                    }));
+                }
+            }
+
+            // 3秒后隐藏控制面板和摄像头
+            setTimeout(() => {
+                _hideRecordControl();
+                stopCamera();
+            }, 4000);
+        }
+
+        // 启动视觉任务（支持 auto / manual 两种模式）
+        async function startVisionTask(taskId, delayMs, mode) {
+            currentVisionTaskId = taskId;
+            await startCamera();
+
+            // 🔥 摄像头打开失败时，立即通知后端清除 pending
+            if (!cameraStream) {
+                console.warn(`[Vision] ❌ 摄像头未能打开，通知后端跳过视觉评估: ${taskId}`);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'vision_eval_result',
+                        task_id: taskId,
+                        result: { success: false, error: 'camera_unavailable', is_correct: null }
+                    }));
+                }
+                return;
+            }
+
+            const delay = delayMs || 3000;
+            const taskMode = mode || 'auto';
+
+            if (taskMode === 'manual') {
+                // 手动模式：等待 delay（TTS播完）后显示录制按钮
+                _manualTaskId = taskId;
+                console.log(`[Vision] 手动录制模式: ${taskId}，${delay}ms 后显示录制按钮`);
+                document.getElementById('camera-label').textContent = '等待指令播放...';
+
+                if (visionCaptureTimer) clearTimeout(visionCaptureTimer);
+                visionCaptureTimer = setTimeout(() => {
+                    if (currentVisionTaskId === taskId) {
+                        _showRecordControl(taskId);
+                        document.getElementById('camera-label').textContent = '请点击开始录制';
+                    }
+                }, delay);
+            } else {
+                // 自动模式：等待 delay 后自动录制固定时长
+                console.log(`[Vision] 自动录制模式: ${taskId}，${delay}ms 后开始`);
+
+                if (visionCaptureTimer) clearTimeout(visionCaptureTimer);
+                visionCaptureTimer = setTimeout(async () => {
+                    if (currentVisionTaskId === taskId) {
+                        await triggerVisionEvaluation(taskId);
+                    }
+                }, delay);
+            }
         }
 
         // ===== Speaker Verification Logic =====
@@ -2062,6 +3709,94 @@
             }
         }
 
+        // --- Speaker Rejection Toast ---
+        let _speakerToastTimer = null;
+        function showSpeakerRejectedToast(similarity) {
+            const toast = document.getElementById('speaker-toast');
+            const simEl = document.getElementById('speaker-toast-sim');
+            if (!toast) return;
+            if (_speakerToastTimer) clearTimeout(_speakerToastTimer);
+
+            simEl.textContent = similarity != null ? `相似度: ${similarity}` : '';
+            toast.classList.add('show');
+
+            // 同时让状态徽章闪烁提示
+            const badge = document.getElementById('status-display');
+            if (badge && currentAppState === 'listening') {
+                const origText = document.getElementById('status-text').textContent;
+                document.getElementById('status-text').textContent = '🔇 非目标说话人';
+                badge.style.color = '#F56565';
+                setTimeout(() => {
+                    if (currentAppState === 'listening') {
+                        document.getElementById('status-text').textContent = origText;
+                        badge.style.color = 'var(--status-listening)';
+                    }
+                }, 2500);
+            }
+
+            _speakerToastTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // --- Export Chat History ---
+        function exportChatHistory() {
+            const stream = document.getElementById('conversation-stream');
+            if (!stream) return;
+
+            const rows = stream.querySelectorAll('.message-row');
+            if (!rows.length) {
+                alert('暂无对话记录可导出');
+                return;
+            }
+
+            const patientName = document.getElementById('patient-name')?.value || '未知';
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+            const timeStr = now.toLocaleTimeString('zh-CN', { hour12: false });
+
+            let lines = [];
+            lines.push('============================================');
+            lines.push('  记忆守护 · AD认知评估 — 对话记录');
+            lines.push('============================================');
+            lines.push(`患者姓名: ${patientName}`);
+            lines.push(`导出时间: ${dateStr} ${timeStr}`);
+            lines.push('--------------------------------------------');
+            lines.push('');
+
+            let turnIndex = 0;
+            rows.forEach(row => {
+                const isUser = row.classList.contains('user');
+                const isAI = row.classList.contains('ai');
+                const bubble = row.querySelector('.bubble');
+                if (!bubble) return;
+                // 获取纯文本（去掉情绪标签等HTML）
+                const text = bubble.innerText.trim();
+                if (!text) return;
+
+                turnIndex++;
+                const role = isUser ? '患者' : 'AI助手';
+                lines.push(`[${String(turnIndex).padStart(3, '0')}] ${role}:`);
+                lines.push(`  ${text}`);
+                lines.push('');
+            });
+
+            lines.push('--------------------------------------------');
+            lines.push(`共 ${turnIndex} 条消息`);
+
+            const content = lines.join('\n');
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `对话记录_${patientName}_${now.toISOString().slice(0, 10)}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
         // Export PDF - Complete Implementation
         async function exportReport() {
             const btn = document.getElementById('export-btn');
@@ -2103,8 +3838,53 @@
                     <p>对抗: ${emotionStats.hostility} 次 (${Math.round(emotionStats.hostility / totalEmotions * 100)}%)</p>
                 ` : '<p>暂无情绪数据记录</p>';
 
-                // AI 建议
-                const recommendations = generateAIRecommendations(totalScore, mmseScores, emotionStats);
+                // AI 建议 — 调用后端 LLM 生成详细建议，失败则回退到本地规则
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> AI 正在生成建议...';
+                let llmAdviceHtml = '';
+                try {
+                    const adviceResp = await fetch('/api/generate-report-advice', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            scores: mmseScores,
+                            total_score: totalScore,
+                            emotions: emotionStats,
+                            patient_name: patientName,
+                            patient_age: patientAge
+                        })
+                    });
+                    const adviceData = await adviceResp.json();
+                    console.log('[PDF Export] 后端返回的建议数据:', adviceData);
+                    if (adviceData.success && adviceData.advice) {
+                        console.log('[PDF Export] AI 建议内容:', adviceData.advice);
+                        // 将 markdown 风格文本转为 HTML 段落
+                        llmAdviceHtml = adviceData.advice
+                            .split('\n')
+                            .filter(l => l.trim())
+                            .map(l => {
+                                // 加粗标题行
+                                if (l.match(/^#{1,3}\s/) || l.match(/^\*\*.+\*\*/)) {
+                                    const clean = l.replace(/^#{1,3}\s*/, '').replace(/\*\*/g, '');
+                                    return `<h3 style="color:#4A90A4; margin:15px 0 5px 0; font-size:14px;">${clean}</h3>`;
+                                }
+                                return `<p style="margin:4px 0; line-height:1.7; font-size:13px;">${l}</p>`;
+                            })
+                            .join('');
+                        console.log('[PDF Export] 转换后的 HTML:', llmAdviceHtml.substring(0, 200) + '...');
+                    } else {
+                        console.warn('[PDF Export] 后端建议数据无效，将使用本地规则');
+                    }
+                } catch (e) {
+                    console.warn('[PDF Export] LLM建议生成失败，使用本地规则:', e);
+                }
+                // 回退到本地规则
+                if (!llmAdviceHtml) {
+                    console.log('[PDF Export] 使用本地规则生成建议');
+                    const recommendations = generateAIRecommendations(totalScore, mmseScores, emotionStats);
+                    llmAdviceHtml = recommendations.map(r => `<p style="margin:4px 0; line-height:1.7; font-size:13px;">${r}</p>`).join('');
+                }
+                console.log('[PDF Export] 最终建议 HTML 长度:', llmAdviceHtml.length);
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 生成报告中...';
 
                 // 截取雷达图
                 let radarImgSrc = '';
@@ -2156,9 +3936,12 @@
                         ` : ''}
                         
                         <h2 style="color: #2d3748; border-left: 4px solid #4A90A4; padding-left: 10px; margin-top: 25px;">AI 评估建议</h2>
-                        ${recommendations.map(r => `<p>${r}</p>`).join('')}
+                        <div style="padding: 10px 0;">${llmAdviceHtml}</div>
                     </div>
                 `;
+
+                console.log('[PDF Export] 报告 HTML 是否包含建议:', reportHtml.includes('AI 评估建议'));
+                console.log('[PDF Export] 建议内容预览:', reportHtml.substring(reportHtml.indexOf('AI 评估建议'), reportHtml.indexOf('AI 评估建议') + 300));
 
                 // 创建临时容器
                 const tempContainer = document.createElement('div');
@@ -2176,14 +3959,45 @@
                     useCORS: true
                 });
 
-                // 计算 PDF 尺寸
+                // 计算 PDF 尺寸并支持多页
                 const imgWidth = 210; // A4 宽度 mm
+                const pageHeight = 297; // A4 高度 mm
                 const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF('p', 'mm', 'a4');
 
-                doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, imgHeight);
+                if (imgHeight <= pageHeight) {
+                    // 单页：内容不超过一页
+                    doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, imgHeight);
+                } else {
+                    // 多页：按 A4 高度分割 canvas
+                    const pageCanvasHeight = Math.floor(canvas.width * pageHeight / imgWidth);
+                    let yOffset = 0;
+                    let pageNum = 0;
+
+                    while (yOffset < canvas.height) {
+                        const sliceHeight = Math.min(pageCanvasHeight, canvas.height - yOffset);
+                        
+                        // 创建当前页的 canvas 切片
+                        const pageCanvas = document.createElement('canvas');
+                        pageCanvas.width = canvas.width;
+                        pageCanvas.height = sliceHeight;
+                        const ctx = pageCanvas.getContext('2d');
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+                        ctx.drawImage(canvas, 0, yOffset, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+
+                        const sliceImgHeight = (sliceHeight * imgWidth) / canvas.width;
+
+                        if (pageNum > 0) doc.addPage();
+                        doc.addImage(pageCanvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, sliceImgHeight);
+
+                        yOffset += pageCanvasHeight;
+                        pageNum++;
+                    }
+                    console.log(`[PDF Export] 生成 ${pageNum} 页报告`);
+                }
 
                 // 清理临时容器
                 document.body.removeChild(tempContainer);

@@ -22,46 +22,74 @@ load_dotenv()
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import numpy as np
-import torch
-# import whisper  # 替换为 SenseVoice
-from funasr import AutoModel
-from funasr.utils.postprocess_utils import rich_transcription_postprocess
+import onnxruntime as ort
+
+_USE_ARK_ASR = os.getenv("USE_ARK_ASR", "false").lower() == "true"
+_USE_ARK_TTS = os.getenv("USE_ARK_TTS", "false").lower() == "true"
+_USE_SPEAKER_VERIFIER = os.getenv("USE_SPEAKER_VERIFIER", "true").lower() == "true"
+_USE_LOCAL_EMBEDDING = os.getenv("USE_LOCAL_EMBEDDING", "true").lower() == "true"
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 import soundfile as sf
 
-# 导入 Silero VAD（直接使用本地缓存，避免网络问题）
-# 尝试多个可能的缓存路径
-cache_paths = [
-    '/root/autodl-tmp/.cache/torch/hub/snakers4_silero-vad_master',
-    os.path.expanduser('~/.cache/torch/hub/snakers4_silero-vad_master')
+# Silero VAD via ONNX Runtime（无 PyTorch 依赖）
+_ONNX_VAD_PATHS = [
+    os.path.join(getattr(__import__('sys'), '_MEIPASS', ''), 'silero_vad.onnx'),  # PyInstaller bundle
+    '/root/autodl-tmp/.cache/torch/hub/snakers4_silero-vad_master/src/silero_vad/data/silero_vad.onnx',
+    os.path.expanduser('~/.cache/torch/hub/snakers4_silero-vad_master/src/silero_vad/data/silero_vad.onnx'),
 ]
 
-vad_model = None
-utils = None
 
-for cache_dir in cache_paths:
-    if os.path.exists(cache_dir):
+class _SileroVADONNX:
+    """Silero VAD v5 via ONNX Runtime，对齐官方 OnnxWrapper 实现"""
+    _CONTEXT_SIZE = 64   # 16kHz context samples prepended to each chunk
+    _NUM_SAMPLES  = 512  # required chunk size at 16kHz
+
+    def __init__(self, model_path: str):
+        self._sess    = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+        self._state   = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros((1, self._CONTEXT_SIZE), dtype=np.float32)
+
+    def __call__(self, audio_chunk: np.ndarray, sample_rate: int) -> float:
+        x  = np.asarray(audio_chunk, dtype=np.float32).reshape(1, -1)
+        x  = np.concatenate([self._context, x], axis=1)          # [1, 576]
+        sr = np.array(sample_rate, dtype=np.int64)
+        out, self._state = self._sess.run(
+            None, {'input': x, 'sr': sr, 'state': self._state}
+        )
+        self._context = x[:, -self._CONTEXT_SIZE:]                # keep last 64
+        return float(out.squeeze())
+
+    def predict_stateless(self, audio_chunk: np.ndarray, sample_rate: int) -> float:
+        """单块无状态检测（不更新内部 state / context，用于快速打断判断）"""
+        x  = np.asarray(audio_chunk, dtype=np.float32).reshape(1, -1)
+        x  = np.concatenate([np.zeros((1, self._CONTEXT_SIZE), dtype=np.float32), x], axis=1)
+        sr = np.array(sample_rate, dtype=np.int64)
+        tmp_state = np.zeros((2, 1, 128), dtype=np.float32)
+        out, _ = self._sess.run(None, {'input': x, 'sr': sr, 'state': tmp_state})
+        return float(out.squeeze())
+
+    def reset_states(self):
+        self._state   = np.zeros((2, 1, 128), dtype=np.float32)
+        self._context = np.zeros((1, self._CONTEXT_SIZE), dtype=np.float32)
+
+
+vad_model = None
+for _onnx_path in _ONNX_VAD_PATHS:
+    if os.path.exists(_onnx_path):
         try:
-            print(f"[VAD] 从本地缓存加载 Silero VAD: {cache_dir}")
-            vad_model, utils = torch.hub.load(
-                repo_or_dir=cache_dir,
-                model='silero_vad',
-                source='local',  # 使用本地源，不联网
-                force_reload=False,
-                onnx=False
-            )
-            print(f"[VAD] ✅ 成功加载 Silero VAD")
+            print(f"[VAD] 从 ONNX 缓存加载 Silero VAD: {_onnx_path}")
+            vad_model = _SileroVADONNX(_onnx_path)
+            print("[VAD] ✅ Silero VAD ONNX 加载完成（无 PyTorch）")
             break
         except Exception as e:
-            print(f"[VAD] ⚠️  从 {cache_dir} 加载失败: {e}")
-            continue
+            print(f"[VAD] ⚠️ 加载失败: {e}")
 
-if vad_model is None or utils is None:
-    raise RuntimeError(f"无法加载 Silero VAD。检查的缓存路径: {cache_paths}")
-
-(get_speech_timestamps, _, read_audio, _, _) = utils
+if vad_model is None:
+    raise RuntimeError(f"找不到 silero_vad.onnx，检查路径: {_ONNX_VAD_PATHS}")
 
 # 导入 Agent
 import os
@@ -78,7 +106,10 @@ from src.domain.dimensions import MMSE_DIMENSIONS
 # from src.tools.voice.tts_tool import VoiceTTS  # 旧的 Edge TTS
 # from src.tools.voice.cosyvoice_tts import CosyVoiceTTS as VoiceTTS  # PaddleSpeech TTS
 # from src.tools.voice.cosyvoice3_tts import CosyVoice3TTS as VoiceTTS  # CosyVoice3 TTS (太慢)
-from src.tools.voice.zipvoice_tts import ZipVoiceTTS as VoiceTTS  # ZipVoice TTS (高质量流匹配)
+if _USE_ARK_TTS:
+    from src.tools.voice.ark_tts import ArkTTS as VoiceTTS  # 🔥 火山引擎 TTS API
+else:
+    from src.tools.voice.zipvoice_tts import ZipVoiceTTS as VoiceTTS  # ZipVoice TTS (高质量流匹配)
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
@@ -124,95 +155,136 @@ def init_models():
     """初始化模型"""
     global ASR_MODEL, AGENT, TTS, SPEAKER_VERIFIER
     
-    print("[初始化] 加载 SenseVoice-Small (多语言+情绪识别+事件检测)...")
-    ASR_MODEL = AutoModel(
-        model="iic/SenseVoiceSmall",
-        vad_model="fsmn-vad",  # 🔥 启用 VAD 自动切割长音频
-        vad_kwargs={"max_single_segment_time": 30000},  # VAD 最大切割时长 30s
-        device="cuda:0" if torch.cuda.is_available() else "cpu",
-        disable_pbar=True,
-        disable_log=False,
-        disable_update=True,  # 🔥 禁用更新检查，避免网络卡住
-    )
-    print("[初始化] ✅ SenseVoice-Small 加载完成（支持情绪识别+事件检测）")
+    if _USE_ARK_ASR:
+        print("[初始化] 🔥 ASR 使用火山引擎 BigASR API（无需加载本地模型）")
+    else:
+        print("[初始化] 加载 SenseVoice-Small (多语言+情绪识别+事件检测)...")
+        from funasr import AutoModel
+        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+        ASR_MODEL = AutoModel(
+            model="iic/SenseVoiceSmall",
+            vad_model="fsmn-vad",  # 🔥 启用 VAD 自动切割长音频
+            vad_kwargs={"max_single_segment_time": 30000},  # VAD 最大切割时长 30s
+            device="cuda:0" if __import__('torch').cuda.is_available() else "cpu",
+            disable_pbar=True,
+            disable_log=False,
+            disable_update=True,  # 🔥 禁用更新检查，避免网络卡住
+        )
+        print("[初始化] ✅ SenseVoice-Small 加载完成（支持情绪识别+事件检测）")
+        print("[初始化] 🔥 预热 SenseVoice ASR...")
+        dummy_audio = np.zeros(16000, dtype=np.float32)
+        _ = ASR_MODEL.generate(input=dummy_audio, cache={}, language="auto", use_itn=True)
+        print("[初始化] ✅ SenseVoice ASR 预热完成")
     
-    # 预热 SenseVoice ASR
-    print("[初始化] 🔥 预热 SenseVoice ASR...")
-    import tempfile
-    import soundfile as sf
-    dummy_audio = np.zeros(16000, dtype=np.float32)  # 1秒静音
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
-    sf.write(temp_file.name, dummy_audio, 16000)
-    _ = ASR_MODEL.generate(input=temp_file.name, cache={}, language="auto", use_itn=True)
-    os.unlink(temp_file.name)
-    print("[初始化] ✅ SenseVoice ASR 预热完成")
-    
-    print("[初始化] 加载 Embedding 模型池 (BGE-M3)...")
-    from src.tools.retrieval.embedding_pool import get_embedding_pool
-    _ = get_embedding_pool()  # 触发 Embedding 模型加载和预热
+    if _USE_LOCAL_EMBEDDING:
+        print("[初始化] 加载 Embedding 模型池 (BGE-M3)...")
+        from src.tools.retrieval.embedding_pool import get_embedding_pool
+        _ = get_embedding_pool()
+    else:
+        print("[初始化] ⏭️ 跳过 BGE-M3（USE_LOCAL_EMBEDDING=false，知识检索功能不可用）")
     
     print(f"[初始化] 加载 Agent ({AGENT_TYPE})...")
-    AGENT = ADScreeningAgent(use_local=True)
+    AGENT = ADScreeningAgent(use_local=False)  # 使用 API 模式，避免加载本地 GPTQ 模型
     print(f"[初始化] ✅ Agent 类型: {AGENT_TYPE}")
     
     print("[初始化] 加载 TTS...")
-    TTS = VoiceTTS()
+    if _USE_ARK_TTS:
+        TTS = VoiceTTS()  # ArkTTS 无需本地模型路径
+        print("[初始化] 🔥 TTS 使用火山引擎 API（无需加载本地模型）")
+    else:
+        import os as _os
+        model_dir = _os.path.join(_os.path.dirname(__file__), "models", "zipvoice_distill")
+        ref_audio = _os.path.join(_os.path.dirname(__file__), "static", "audio", "参考音频.wav")
+        ref_text_path = _os.path.join(_os.path.dirname(__file__), "static", "audio", "参考音频.txt")
+        ref_text = None
+        if _os.path.exists(ref_text_path):
+            with open(ref_text_path, "r", encoding="utf-8") as f:
+                ref_text = f.read().strip()
+        TTS = VoiceTTS(model_dir=model_dir, prompt_wav=ref_audio, prompt_text=ref_text)
     
-    print("[初始化] 加载声纹验证器 (ECAPA-TDNN)...")
-    from src.tools.voice.speaker_verification import get_speaker_verifier
-    SPEAKER_VERIFIER = get_speaker_verifier(threshold=0.25)
-    print("[初始化] ✅ 声纹验证器加载完成")
+    if _USE_SPEAKER_VERIFIER:
+        print("[初始化] 加载声纹验证器 (ECAPA-TDNN)...")
+        try:
+            from src.tools.voice.speaker_verification import get_speaker_verifier
+            SPEAKER_VERIFIER = get_speaker_verifier(threshold=0.25)
+            print("[初始化] ✅ 声纹验证器加载完成")
+        except Exception as e:
+            print(f"[初始化] ⚠️ 声纹验证器加载失败: {e}")
+            SPEAKER_VERIFIER = None
+    else:
+        print("[初始化] ⏭️ 跳过声纹验证器（USE_SPEAKER_VERIFIER=false，可按需懒加载）")
     
     # 预加载地理位置信息（轻量）
     from src.utils.location_service import get_deployment_location
     location = get_deployment_location()
     print(f"[初始化] 📍 当前位置: {location.get('province', '未知')} {location.get('city', '未知')}")
     
+    # LLM 已切换为 API 模式，无需预加载本地模型池
+    print("[初始化] 💡 LLM 使用 API 模式（无需加载本地 7B-GPTQ，节省 ~6GB 显存）")
+    
     print("[初始化] ✅ 所有本地模型加载+预热完成")
 
 
 class VADBuffer:
-    """VAD 音频缓冲区"""
+    """VAD 音频缓冲区 - v1 实时优化版"""
     def __init__(self, sample_rate=16000):
         self.sample_rate = sample_rate
         self.buffer = []
         self.is_speaking = False
         self.silence_chunks = 0
-        self.MAX_SILENCE_CHUNKS = 30  # 约2秒静音
+        # 🔥 v1优化: 从30(~2s)降到12(~0.7s)，大幅减少用户等待感
+        # 512样本@16kHz = 32ms/chunk, 12*32ms ≈ 384ms + VAD处理延迟 ≈ 0.5-0.7s
+        self.MAX_SILENCE_CHUNKS = 12  # 约0.7秒静音（v0: 30 ≈ 2秒）
+        self._speech_chunk_count = 0  # 🔥 记录有效语音块数，用于动态调整
         
     def add_chunk(self, audio_chunk):
-        """添加音频块并检测VAD"""
-        # Silero VAD 要求每次 512 个样本，需要分块
+        """添加音频块并检测VAD - v1 实时优化版
+        
+        优化点:
+        1. 动态静音阈值：短语句(< 1s语音)用更短的静音等待
+        2. 最小语音长度保护：防止噪音误触发
+        """
         VAD_CHUNK_SIZE = 512
         
         for i in range(0, len(audio_chunk), VAD_CHUNK_SIZE):
             chunk_512 = audio_chunk[i:i+VAD_CHUNK_SIZE]
             
-            # 不足 512 个样本，保存到下次
             if len(chunk_512) < VAD_CHUNK_SIZE:
                 self.buffer.append(chunk_512)
                 continue
             
-            # 转换为 torch tensor
-            audio_tensor = torch.from_numpy(chunk_512.astype(np.float32))
-            
-            # VAD 检测
-            speech_prob = vad_model(audio_tensor, self.sample_rate).item()
+            speech_prob = vad_model(chunk_512, self.sample_rate)
             
             if speech_prob > 0.5:  # 检测到语音
                 if not self.is_speaking:
                     print(f"[VAD] 🎤 正在说话... (prob={speech_prob:.2f})")
                     self.is_speaking = True
                 self.silence_chunks = 0
+                self._speech_chunk_count += 1
                 self.buffer.append(chunk_512)
             else:  # 静音
                 if self.is_speaking:
                     self.buffer.append(chunk_512)
                     self.silence_chunks += 1
                     
-                    if self.silence_chunks >= self.MAX_SILENCE_CHUNKS:
-                        # 静音足够长，返回完整语音
-                        print(f"[VAD] ⏹️ 说话结束")
+                    # 🔥 v1: 动态静音阈值
+                    # 长语音(>2s)用标准阈值，短语音(<1s)用更短阈值
+                    speech_duration = self._speech_chunk_count * VAD_CHUNK_SIZE / self.sample_rate
+                    if speech_duration > 2.0:
+                        effective_threshold = self.MAX_SILENCE_CHUNKS  # ~0.7s
+                    elif speech_duration > 0.5:
+                        effective_threshold = max(8, self.MAX_SILENCE_CHUNKS)  # ~0.5s
+                    else:
+                        effective_threshold = self.MAX_SILENCE_CHUNKS + 4  # 短音频多等一点防噪音
+                    
+                    if self.silence_chunks >= effective_threshold:
+                        # 🔥 v1: 最小语音长度保护（至少0.3秒语音才认为是有效发言）
+                        if speech_duration < 0.3:
+                            print(f"[VAD] ⚠️ 语音过短({speech_duration:.2f}s)，可能是噪音，跳过")
+                            self.reset()
+                            return None
+                        
+                        print(f"[VAD] ⏹️ 说话结束 (语音{speech_duration:.1f}s, 静音阈值{effective_threshold}块)")
                         complete_audio = np.concatenate(self.buffer)
                         self.reset()
                         return complete_audio
@@ -224,83 +296,94 @@ class VADBuffer:
         if len(audio_chunk) < 512:
             return 0.0
         
-        # 取前512个样本检测
+        # 取前512个样本检测（无状态，不影响 add_chunk 的 VAD 状态）
         chunk_512 = audio_chunk[:512]
-        audio_tensor = torch.from_numpy(chunk_512.astype(np.float32))
-        speech_prob = vad_model(audio_tensor, self.sample_rate).item()
-        return speech_prob
+        return vad_model.predict_stateless(chunk_512, self.sample_rate)
     
     def reset(self):
         """重置缓冲区"""
         self.buffer = []
         self.is_speaking = False
         self.silence_chunks = 0
+        self._speech_chunk_count = 0
+        vad_model.reset_states()
+
+
+def _parse_sensevoice_result(result) -> dict:
+    """
+    🔥 v1: 统一解析 SenseVoice 结果（提取文本、情绪、语言、事件）
+    避免在 quick_asr 和 process_speech 中重复代码
+    """
+    text = ""
+    emotion = "neutral"
+    language = "zh"
+    event = "Speech"
+    
+    if not result or len(result) == 0:
+        return {"text": text, "emotion": emotion, "language": language, "event": event}
+    
+    raw_text = result[0].get("text", "")
+    from funasr.utils.postprocess_utils import rich_transcription_postprocess
+    text = rich_transcription_postprocess(raw_text)
+    
+    # 解析情绪标签
+    emotion_map = {
+        "<|HAPPY|>": "happy", "<|SAD|>": "sad", "<|ANGRY|>": "angry",
+        "<|FEARFUL|>": "fearful", "<|DISGUSTED|>": "disgusted", "<|SURPRISED|>": "surprised"
+    }
+    for tag, emo in emotion_map.items():
+        if tag in raw_text:
+            emotion = emo
+            break
+    
+    # 解析语言标签
+    lang_map = {"<|zh|>": "zh", "<|en|>": "en", "<|yue|>": "yue", "<|ja|>": "ja", "<|ko|>": "ko"}
+    for tag, lang in lang_map.items():
+        if tag in raw_text:
+            language = lang
+            break
+    
+    # 解析事件标签
+    event_map = {
+        "<|Applause|>": "Applause", "<|Laughter|>": "Laughter", "<|Cry|>": "Cry",
+        "<|Cough|>": "Cough", "<|Sneeze|>": "Sneeze", "<|Breath|>": "Breath", "<|BGM|>": "BGM"
+    }
+    for tag, evt in event_map.items():
+        if tag in raw_text:
+            event = evt
+            break
+    
+    return {"text": text, "emotion": emotion, "language": language, "event": event}
 
 
 async def quick_asr(audio_data: np.ndarray) -> str:
     """
-    快速ASR识别（用于打断检测）
-    使用 SenseVoice-Small
+    快速ASR识别（用于打断检测）- v1 优化版
+    🔥 直接传 numpy array，省去临时文件 I/O (~100-200ms)
     """
     try:
         print(f"[快速ASR] 开始识别，音频长度: {len(audio_data)/16000:.2f}秒")
         start_time = time.time()
+
+        if _USE_ARK_ASR:
+            from src.tools.voice.ark_asr import ark_asr_recognize
+            parsed = await ark_asr_recognize(audio_data)
+        else:
+            result = await asyncio.to_thread(
+                ASR_MODEL.generate,
+                input=audio_data,
+                cache={},
+                language="auto",
+                use_itn=True,
+                batch_size_s=60,
+                merge_vad=True,
+                merge_length_s=15
+            )
+            parsed = _parse_sensevoice_result(result)
+        text = parsed["text"]
         
-        # 保存临时文件
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
-        sf.write(temp_file.name, audio_data, 16000)
-        
-        # SenseVoice 转录（按官方文档配置）
-        result = await asyncio.to_thread(
-            ASR_MODEL.generate,
-            input=temp_file.name,
-            cache={},
-            language="auto",  # 自动检测语言：zh, en, yue, ja, ko, nospeech
-            use_itn=True,  # 使用逆文本归一化（标点、数字转换）
-            batch_size_s=60,  # 动态batch，总音频时长60s
-            merge_vad=True,  # 合并VAD切割的短音频
-            merge_length_s=15  # 合并后长度15s
-        )
-        
-        # 提取文本和情绪（使用官方后处理工具）
-        text = ""
-        emotion = "neutral"
-        event = "Speech"
-        
-        if result and len(result) > 0:
-            # 使用官方后处理工具解析富文本
-            raw_text = result[0].get("text", "")
-            text = rich_transcription_postprocess(raw_text)
-            
-            # 解析情绪标签：<|HAPPY|>, <|SAD|>, <|ANGRY|>, <|NEUTRAL|> 等
-            if "<|HAPPY|>" in raw_text:
-                emotion = "happy"
-            elif "<|SAD|>" in raw_text:
-                emotion = "sad"
-            elif "<|ANGRY|>" in raw_text:
-                emotion = "angry"
-            elif "<|FEARFUL|>" in raw_text:
-                emotion = "fearful"
-            elif "<|DISGUSTED|>" in raw_text:
-                emotion = "disgusted"
-            elif "<|SURPRISED|>" in raw_text:
-                emotion = "surprised"
-            
-            # 解析事件标签：<|Speech|>, <|Applause|>, <|Laughter|>, <|Cry|> 等
-            if "<|Applause|>" in raw_text:
-                event = "Applause"
-            elif "<|Laughter|>" in raw_text:
-                event = "Laughter"
-            elif "<|Cry|>" in raw_text:
-                event = "Cry"
-            elif "<|Cough|>" in raw_text:
-                event = "Cough"
-            elif "<|Sneeze|>" in raw_text:
-                event = "Sneeze"
-            
-            print(f"[快速ASR] 情绪: {emotion}, 事件: {event}")
-        
-        os.unlink(temp_file.name)
+        if parsed["emotion"] != "neutral" or parsed["event"] != "Speech":
+            print(f"[快速ASR] 情绪: {parsed['emotion']}, 事件: {parsed['event']}")
         
         elapsed = time.time() - start_time
         print(f"[快速ASR] 识别完成: '{text}' (耗时 {elapsed:.2f}秒)")
@@ -339,7 +422,7 @@ async def judge_interrupt_intent(text: str) -> str:
         print(f"[语义判断] 太短: {text}")
         return 'backchannel'
     
-    # 使用本地LLM判断
+    # 使用 LLM 判断（API 或本地，取决于 Agent 配置）
     try:
         prompt = f"""判断下面这句话的意图，只输出一个字母：
 B - 应答词（如"嗯"、"啊"、"对"等简短回应）
@@ -382,6 +465,13 @@ I - 不完整的句子
 async def startup_event():
     """启动时初始化"""
     init_models()
+    # 预热 ArkTTS 连接：提前建立 WebSocket，消除第一个用户的 ~2.5s 建连延迟
+    if _USE_ARK_TTS and TTS is not None:
+        try:
+            await TTS._ensure_connected()
+            print("[初始化] 🔥 ArkTTS WebSocket 连接预热完成")
+        except Exception as e:
+            print(f"[初始化] ⚠️ ArkTTS 预热失败（不影响启动）: {e}")
 
 
 @app.get("/")
@@ -507,10 +597,8 @@ async def index():
                     for (let i = 0; i < inputData.length; i++) {
                         int16Array[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
                     }
-                    ws.send(JSON.stringify({
-                        type: 'audio',
-                        data: Array.from(int16Array)
-                    }));
+                    // 🔥 v1: 二进制发送
+                    ws.send(int16Array.buffer);
                 };
                 
                 source.connect(scriptProcessor);
@@ -611,6 +699,41 @@ async def index():
 </html>
     """
     return HTMLResponse(content=html)
+
+
+@app.get("/api/mmse-image/{image_id}")
+async def mmse_image(image_id: str):
+    """提供 MMSE 题目图片"""
+    safe_id = image_id.replace("/", "").replace("..", "")
+    image_path = Path(__file__).parent / "static" / "mmse_images" / f"{safe_id}.png"
+    if not image_path.exists():
+        return JSONResponse({"error": f"图片不存在: {safe_id}"}, status_code=404)
+    return FileResponse(str(image_path), media_type="image/png")
+
+
+@app.post("/api/vision-evaluate")
+async def vision_evaluate(request: Request):
+    """视觉评估接口 - 摄像头视频/截帧评估"""
+    from src.tools.agent_tools.vision_evaluation_tool import evaluate_hybrid
+    try:
+        body = await request.json()
+        task_id = body.get("task_id", "")
+        video_b64 = body.get("video", "")
+        mime = body.get("mime_type", "video/webm")
+        frames = body.get("frames", [])
+        context = body.get("context", "")
+        result = await asyncio.to_thread(
+            evaluate_hybrid,
+            task_id=task_id,
+            video_base64=video_b64,
+            mime_type=mime,
+            frames_base64=frames,
+            extra_context=context,
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e),
+                             "is_correct": None, "quality_level": "unknown"}, status_code=500)
 
 
 @app.websocket("/ws")
@@ -723,95 +846,49 @@ async def websocket_endpoint(websocket: WebSocket):
         nonlocal stop_generate, ai_speaking_until, is_processing, speaker_enrolled
         
         try:
-            # 保存临时文件
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
-            sf.write(temp_file.name, audio_data, 16000)
-            
             # 0. 声纹验证 - 过滤非目标说话人（只在启用时验证，不自动注册）
-            # 🔍 调试：打印所有条件
             print(f"[声纹调试] SPEAKER_VERIFIER={SPEAKER_VERIFIER is not None}, "
                   f"speaker_enrolled={speaker_enrolled}, "
                   f"is_enrolled={SPEAKER_VERIFIER.is_enrolled if SPEAKER_VERIFIER else 'N/A'}, "
                   f"speaker_verify_enabled={speaker_verify_enabled}")
             
             if SPEAKER_VERIFIER and speaker_enrolled and SPEAKER_VERIFIER.is_enrolled and speaker_verify_enabled:
-                is_target, similarity = SPEAKER_VERIFIER.verify(temp_file.name)
+                # 声纹验证需要文件路径，临时写入
+                _sv_temp = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
+                sf.write(_sv_temp.name, audio_data, 16000)
+                is_target, similarity = SPEAKER_VERIFIER.verify(_sv_temp.name)
+                os.unlink(_sv_temp.name)
                 print(f"[声纹] 🎯 验证结果: is_target={is_target}, similarity={similarity:.2f}")
                 if not is_target:
                     print(f"[FLOW] ⏭️ 非目标说话人 (相似度: {similarity:.2f})，跳过处理")
-                    os.unlink(temp_file.name)
                     return
                 else:
                     print(f"[声纹] ✅ 目标说话人确认 (相似度: {similarity:.2f})")
             
-            # 1. SenseVoice 转录（多语言+情绪+事件识别）
-            print("\n[FLOW] 1️⃣ 语音转文字+情绪识别 (SenseVoice)...")
-            result = ASR_MODEL.generate(
-                input=temp_file.name,
-                cache={},
-                language="auto",  # 自动检测语言：zh, en, yue, ja, ko
-                use_itn=True,  # 使用逆文本归一化（标点、数字转换）
-                batch_size_s=60,  # 动态batch
-                merge_vad=True,  # 合并VAD切割的短音频
-                merge_length_s=15  # 合并后长度15s
-            )
+            # 1. 🔥 v1优化: 直接传 numpy array，省去磁盘 I/O (~100-200ms)
+            if _USE_ARK_ASR:
+                print("\n[FLOW] 1️⃣ 语音转文字 (火山引擎 BigASR)...")
+                from src.tools.voice.ark_asr import ark_asr_recognize
+                parsed = await ark_asr_recognize(audio_data)
+            else:
+                print("\n[FLOW] 1️⃣ 语音转文字+情绪识别 (SenseVoice, 无文件I/O)...")
+                result = await asyncio.to_thread(
+                    ASR_MODEL.generate,
+                    input=audio_data,
+                    cache={},
+                    language="auto",
+                    use_itn=True,
+                    batch_size_s=60,
+                    merge_vad=True,
+                    merge_length_s=15
+                )
+                parsed = _parse_sensevoice_result(result)
+            text = parsed["text"]
+            emotion = parsed["emotion"]
+            language = parsed["language"]
+            event = parsed["event"]
             
-            # 提取文本、情绪、语言、事件
-            text = ""
-            emotion = "neutral"
-            language = "zh"
-            event = "Speech"
-            
-            if result and len(result) > 0:
-                # 使用官方后处理工具解析富文本
-                raw_text = result[0].get("text", "")
-                text = rich_transcription_postprocess(raw_text)
-                
-                # 解析情绪标签（7种情绪）
-                if "<|HAPPY|>" in raw_text:
-                    emotion = "happy"
-                elif "<|SAD|>" in raw_text:
-                    emotion = "sad"
-                elif "<|ANGRY|>" in raw_text:
-                    emotion = "angry"
-                elif "<|FEARFUL|>" in raw_text:
-                    emotion = "fearful"
-                elif "<|DISGUSTED|>" in raw_text:
-                    emotion = "disgusted"
-                elif "<|SURPRISED|>" in raw_text:
-                    emotion = "surprised"
-                
-                # 解析语言标签
-                if "<|zh|>" in raw_text:
-                    language = "zh"
-                elif "<|en|>" in raw_text:
-                    language = "en"
-                elif "<|yue|>" in raw_text:
-                    language = "yue"
-                elif "<|ja|>" in raw_text:
-                    language = "ja"
-                elif "<|ko|>" in raw_text:
-                    language = "ko"
-                
-                # 解析事件标签（8种事件）
-                if "<|Applause|>" in raw_text:
-                    event = "Applause"
-                elif "<|Laughter|>" in raw_text:
-                    event = "Laughter"
-                elif "<|Cry|>" in raw_text:
-                    event = "Cry"
-                elif "<|Cough|>" in raw_text:
-                    event = "Cough"
-                elif "<|Sneeze|>" in raw_text:
-                    event = "Sneeze"
-                elif "<|Breath|>" in raw_text:
-                    event = "Breath"
-                elif "<|BGM|>" in raw_text:
-                    event = "BGM"
-                
-                print(f"[ASR] 语言: {language}, 情绪: {emotion}, 事件: {event}")
-            
-            os.unlink(temp_file.name)
+            print(f"[ASR] 语言: {language}, 情绪: {emotion}, 事件: {event}")
             
             if not text:
                 print(f"[ASR] ⚠️ 识别结果为空，跳过处理")
@@ -996,8 +1073,38 @@ async def websocket_endpoint(websocket: WebSocket):
     
     try:
         while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
+            # 🔥 v1优化: 支持二进制音频帧 + JSON控制消息的混合接收
+            try:
+                raw_message = await websocket.receive()
+            except RuntimeError as e:
+                # Starlette 在收到 disconnect 后再调 receive() 会抛 RuntimeError
+                print(f"[断开] WebSocket 已断开 ({e})")
+                break
+            
+            # 检查是否是断连消息
+            if raw_message.get('type') == 'websocket.disconnect':
+                print(f"[断开] 收到 disconnect 消息")
+                break
+            
+            # 二进制消息 → 音频数据（高频，低延迟路径）
+            if 'bytes' in raw_message and raw_message['bytes']:
+                audio_bytes = raw_message['bytes']
+                audio_data = np.frombuffer(audio_bytes, dtype=np.int16)
+                audio_float = audio_data.astype(np.float32) / 32768.0
+                
+                # 复用下面的音频处理逻辑（构造兼容的 message 结构）
+                message = {'type': 'audio', '_audio_float': audio_float}
+            elif 'text' in raw_message and raw_message['text']:
+                # 文本消息 → JSON 控制指令
+                data = raw_message['text']
+                message = json.loads(data)
+                
+                # 🔥 v1 兼容: 旧版 JSON 音频格式仍然支持
+                if message.get('type') == 'audio' and 'data' in message:
+                    audio_data = np.array(message['data'], dtype=np.int16)
+                    message['_audio_float'] = audio_data.astype(np.float32) / 32768.0
+            else:
+                continue
             
             # 处理心跳消息
             if message.get('type') == 'ping':
@@ -1327,6 +1434,148 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"[打断] ✅ 手动打断完成")
                 continue
             
+            # 🎨 处理数位板画图提交
+            if message.get('type') == 'drawing_submit':
+                image_b64 = message.get('image', '')
+                if not image_b64:
+                    await send_json_safe(websocket, {'type': 'drawing_result', 'error': '未收到图片数据'})
+                    continue
+
+                print(f"[画图] 收到数位板画图，开始 VLM 评估...")
+                await send_json_safe(websocket, {'type': 'drawing_evaluating', 'message': '正在评估画作...'})
+
+                try:
+                    from src.tools.agent_tools.vision_evaluation_tool import evaluate_image_with_vlm
+                    eval_result = await asyncio.to_thread(
+                        evaluate_image_with_vlm,
+                        image_b64,
+                        "copy_pentagons",
+                    )
+                    print(f"[画图] VLM 评估结果: {eval_result}")
+
+                    await send_json_safe(websocket, {
+                        'type': 'drawing_result',
+                        'result': eval_result,
+                    })
+
+                    is_correct = eval_result.get('is_correct')
+                    quality = eval_result.get('quality_level', 'unknown')
+                    if is_correct is True:
+                        synthetic_input = f"【患者画图完成】临摹两个相交五边形，结果：正确（{quality}）"
+                    elif is_correct is False:
+                        synthetic_input = f"【患者画图完成】临摹两个相交五边形，结果：不正确（{quality}）"
+                    else:
+                        synthetic_input = "【患者画图完成】临摹完成，无法判断结果"
+
+                    while is_processing:
+                        await asyncio.sleep(0.1)
+                    is_processing = True
+                    try:
+                        chat_history.append({'role': 'user', 'content': synthetic_input})
+                        await append_history('user', synthetic_input)
+
+                        result = AGENT.process_turn(
+                            user_input=synthetic_input,
+                            session_id=session_id,
+                            patient_profile=patient_profile if patient_profile else {},
+                            chat_history=chat_history,
+                        )
+                        await send_image_display_if_needed(result, source="drawing")
+                        response = result.get('output', '好的，我们继续。')
+                        await send_json_safe(websocket, {'type': 'ai_response', 'text': response})
+                        await append_history('assistant', response)
+                        chat_history.append({'role': 'assistant', 'content': response})
+
+                        tts_text = clean_for_tts(response)
+                        await send_json_safe(websocket, {'type': 'tts_start', 'text': tts_text})
+                        total_samples = 0
+                        chunk_count = 0
+                        async for audio_chunk in TTS.text_to_speech_streaming(tts_text, emotion="neutral"):
+                            chunk_bytes = audio_chunk.tobytes()
+                            chunk_b64 = _base64.b64encode(chunk_bytes).decode('utf-8')
+                            await send_json_safe(websocket, {
+                                'type': 'tts_chunk', 'chunk': chunk_b64,
+                                'sample_rate': 24000, 'dtype': 'float32'
+                            })
+                            chunk_count += 1
+                            total_samples += len(audio_chunk)
+                        audio_duration = total_samples / 24000.0 if total_samples > 0 else 3.0
+                        await send_json_safe(websocket, {'type': 'tts_end', 'duration': audio_duration, 'chunks': chunk_count})
+                        ai_speaking_until = time.time() + audio_duration
+                    finally:
+                        is_processing = False
+                except Exception as e:
+                    print(f"[画图] ❌ 评估失败: {e}")
+                    import traceback; traceback.print_exc()
+                    await send_json_safe(websocket, {'type': 'drawing_result', 'error': str(e)})
+                continue
+
+            # 📷 处理摄像头视觉评估结果（前端发回）
+            if message.get('type') == 'vision_eval_result':
+                task_id = message.get('task_id', '')
+                eval_result = message.get('result', {})
+                print(f"[视觉评估] 收到前端评估结果: task={task_id}, result={eval_result}")
+
+                is_correct = eval_result.get('is_correct')
+                quality = eval_result.get('quality_level', 'unknown')
+                if task_id == 'copy_pentagons':
+                    if is_correct is True:
+                        synthetic_input = f"【患者画图完成】临摹两个相交五边形，结果：正确（{quality}）"
+                    elif is_correct is False:
+                        synthetic_input = f"【患者画图完成】临摹两个相交五边形，结果：不正确（{quality}）"
+                    else:
+                        synthetic_input = "【患者画图完成】临摹完成，无法判断结果"
+                elif task_id == 'language_reading_close_eyes':
+                    if is_correct is True:
+                        synthetic_input = "【视觉评估】患者完成了闭眼动作"
+                    else:
+                        synthetic_input = "【视觉评估】患者未做出闭眼动作"
+                elif task_id == 'language_3step_action':
+                    steps = eval_result.get('steps_completed', 0)
+                    synthetic_input = f"【视觉评估】患者完成三步动作，完成步骤数：{steps}"
+                else:
+                    synthetic_input = f"【视觉评估结果】任务={task_id}, 正确={is_correct}, 质量={quality}"
+
+                while is_processing:
+                    await asyncio.sleep(0.1)
+                is_processing = True
+                try:
+                    chat_history.append({'role': 'user', 'content': synthetic_input})
+                    await append_history('user', synthetic_input)
+                    result = AGENT.process_turn(
+                        user_input=synthetic_input,
+                        session_id=session_id,
+                        patient_profile=patient_profile if patient_profile else {},
+                        chat_history=chat_history,
+                    )
+                    await send_image_display_if_needed(result, source="vision")
+                    response = result.get('output', '好的，我们继续。')
+                    await send_json_safe(websocket, {'type': 'ai_response', 'text': response})
+                    await append_history('assistant', response)
+                    chat_history.append({'role': 'assistant', 'content': response})
+
+                    tts_text = clean_for_tts(response)
+                    await send_json_safe(websocket, {'type': 'tts_start', 'text': tts_text})
+                    total_samples = 0
+                    chunk_count = 0
+                    async for audio_chunk in TTS.text_to_speech_streaming(tts_text, emotion="neutral"):
+                        chunk_bytes = audio_chunk.tobytes()
+                        chunk_b64 = _base64.b64encode(chunk_bytes).decode('utf-8')
+                        await send_json_safe(websocket, {
+                            'type': 'tts_chunk', 'chunk': chunk_b64,
+                            'sample_rate': 24000, 'dtype': 'float32'
+                        })
+                        chunk_count += 1
+                        total_samples += len(audio_chunk)
+                    audio_duration = total_samples / 24000.0 if total_samples > 0 else 3.0
+                    await send_json_safe(websocket, {'type': 'tts_end', 'duration': audio_duration, 'chunks': chunk_count})
+                    ai_speaking_until = time.time() + audio_duration
+                except Exception as e:
+                    print(f"[视觉评估] ❌ Agent 处理失败: {e}")
+                finally:
+                    is_processing = False
+                continue
+
             # 📝 处理文字消息
             if message.get('type') == 'text':
                 text = message.get('data', '').strip()
@@ -1414,31 +1663,30 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception as e:
                             print(f"[评分] 发送评分失败: {e}")
                         
-                        # 生成并发送语音（文字模式默认使用温和语气）
-                        audio_file = await TTS.text_to_speech_async(response, emotion="gentle")
-                        with open(audio_file, 'rb') as f:
-                            audio_bytes = f.read()
-                        audio_base64 = _base64.b64encode(audio_bytes).decode('utf-8')
+                        # 生成并发送语音（文字模式也用流式，和语音模式一致）
+                        tts_text = clean_for_tts(response)
+                        await websocket.send_json({'type': 'tts_start', 'text': tts_text})
                         
-                        # 获取音频时长
-                        audio_duration = 3.0
-                        try:
-                            import wave
-                            wav_file = audio_file.replace('.mp3', '.wav') if audio_file.endswith('.mp3') else audio_file
-                            if os.path.exists(wav_file):
-                                with wave.open(wav_file, 'rb') as wf:
-                                    frames = wf.getnframes()
-                                    rate = wf.getframerate()
-                                    audio_duration = frames / float(rate)
-                        except:
-                            pass
+                        total_samples = 0
+                        chunk_count = 0
+                        async for audio_chunk in TTS.text_to_speech_streaming(tts_text, emotion="neutral"):
+                            chunk_bytes = audio_chunk.tobytes()
+                            chunk_base64 = _base64.b64encode(chunk_bytes).decode('utf-8')
+                            await websocket.send_json({
+                                'type': 'tts_chunk',
+                                'chunk': chunk_base64,
+                                'sample_rate': 24000,
+                                'dtype': 'float32'
+                            })
+                            chunk_count += 1
+                            total_samples += len(audio_chunk)
                         
+                        audio_duration = total_samples / 24000.0 if total_samples > 0 else 3.0
                         await websocket.send_json({
-                            'type': 'tts_audio',
-                            'audio': audio_base64,
-                            'duration': audio_duration
+                            'type': 'tts_end',
+                            'duration': audio_duration,
+                            'chunks': chunk_count
                         })
-                        os.unlink(audio_file)
                         
                         # 添加到历史
                         chat_history.append({'role': 'assistant', 'content': response})
@@ -1453,10 +1701,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     continue
             
-            if message['type'] == 'audio':
-                # 接收音频块
-                audio_data = np.array(message['data'], dtype=np.int16)
-                audio_float = audio_data.astype(np.float32) / 32768.0
+            if message.get('type') == 'audio':
+                # 🔥 v1优化: 使用预解析的音频数据（二进制路径已在上面解析）
+                audio_float = message.get('_audio_float')
+                if audio_float is None:
+                    continue
                 
                 # ⭐ 如果正在处理，静默丢弃所有音频（避免并发和重复日志）
                 if is_processing and not waiting_for_complete:
@@ -1578,21 +1827,17 @@ async def websocket_endpoint(websocket: WebSocket):
                                             'text': confirm_response
                                         })
                                         
-                                        # 合成并发送语音（快速版）
+                                        # 合成并发送语音（流式，和主路径一致）
                                         try:
-                                            audio_file = await TTS.text_to_speech_async(confirm_response, emotion="gentle")
-                                            with open(audio_file, 'rb') as f:
-                                                audio_bytes = f.read()
-                                            audio_base64 = _base64.b64encode(audio_bytes).decode('utf-8')
+                                            await websocket.send_json({'type': 'tts_start', 'text': confirm_response})
+                                            _total_samples = 0
+                                            async for _ac in TTS.text_to_speech_streaming(confirm_response, emotion="neutral"):
+                                                _cb = _base64.b64encode(_ac.tobytes()).decode('utf-8')
+                                                await websocket.send_json({'type': 'tts_chunk', 'chunk': _cb, 'sample_rate': 24000, 'dtype': 'float32'})
+                                                _total_samples += len(_ac)
+                                            _dur = _total_samples / 24000.0 if _total_samples > 0 else 1.5
+                                            await websocket.send_json({'type': 'tts_end', 'duration': _dur})
                                             
-                                            await websocket.send_json({
-                                                'type': 'tts_audio',
-                                                'audio': audio_base64,
-                                                'duration': 1.5  # 简短回复，大概1.5秒
-                                            })
-                                            os.unlink(audio_file)
-                                            
-                                            # 记录到历史
                                             chat_history.append({'role': 'assistant', 'content': confirm_response})
                                             
                                         except Exception as e:
@@ -1647,21 +1892,17 @@ async def websocket_endpoint(websocket: WebSocket):
                                                     'text': confirm_response
                                                 })
                                                 
-                                                # 合成并发送语音（快速版）
+                                                # 合成并发送语音（流式，和主路径一致）
                                                 try:
-                                                    audio_file = await TTS.text_to_speech_async(confirm_response, emotion="gentle")
-                                                    with open(audio_file, 'rb') as f:
-                                                        audio_bytes = f.read()
-                                                    audio_base64 = _base64.b64encode(audio_bytes).decode('utf-8')
+                                                    await websocket.send_json({'type': 'tts_start', 'text': confirm_response})
+                                                    _total_samples2 = 0
+                                                    async for _ac2 in TTS.text_to_speech_streaming(confirm_response, emotion="neutral"):
+                                                        _cb2 = _base64.b64encode(_ac2.tobytes()).decode('utf-8')
+                                                        await websocket.send_json({'type': 'tts_chunk', 'chunk': _cb2, 'sample_rate': 24000, 'dtype': 'float32'})
+                                                        _total_samples2 += len(_ac2)
+                                                    _dur2 = _total_samples2 / 24000.0 if _total_samples2 > 0 else 1.5
+                                                    await websocket.send_json({'type': 'tts_end', 'duration': _dur2})
                                                     
-                                                    await websocket.send_json({
-                                                        'type': 'tts_audio',
-                                                        'audio': audio_base64,
-                                                        'duration': 1.5
-                                                    })
-                                                    os.unlink(audio_file)
-                                                    
-                                                    # 记录到历史
                                                     chat_history.append({'role': 'assistant', 'content': confirm_response})
                                                     
                                                 except Exception as e:

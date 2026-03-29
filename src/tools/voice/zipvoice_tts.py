@@ -222,7 +222,28 @@ class ZipVoiceTTS:
     def _load_vocoder(self):
         """加载 Vocos vocoder"""
         print(f"[ZipVoice] 📥 加载 Vocos vocoder...")
-        self.vocoder = Vocos.from_pretrained("charactr/vocos-mel-24khz")
+        # 尝试从本地加载，如果不存在则从 HuggingFace 下载
+        local_vocoder_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models', 'vocos-mel-24khz')
+        local_vocoder_path = os.path.normpath(local_vocoder_path)
+        
+        if os.path.exists(local_vocoder_path):
+            print(f"[ZipVoice] 从本地加载 Vocoder: {local_vocoder_path}")
+            # 使用 from_hparams 从本地配置加载
+            import yaml
+            config_path = os.path.join(local_vocoder_path, "config.yaml")
+            checkpoint_path = os.path.join(local_vocoder_path, "pytorch_model.bin")
+            
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            
+            self.vocoder = Vocos.from_hparams(config_path)
+            # 加载权重
+            state_dict = torch.load(checkpoint_path, map_location='cpu')
+            self.vocoder.load_state_dict(state_dict)
+        else:
+            print(f"[ZipVoice] 从 HuggingFace 下载 Vocoder...")
+            self.vocoder = Vocos.from_pretrained("charactr/vocos-mel-24khz")
+        
         self.vocoder = self.vocoder.to(self.device)
         self.vocoder.eval()
         print(f"[ZipVoice] ✅ Vocoder 加载完成")
@@ -321,7 +342,7 @@ class ZipVoiceTTS:
         version_tag = f"zipvoice_{self.model_name}_v1"
         key = f"{version_tag}|{emotion}|{text}".encode("utf-8")
         digest = hashlib.sha1(key).hexdigest()
-        temp_dir = Path("/root/autodl-tmp/tmp/ad_screening_voice")
+        temp_dir = Path(os.path.dirname(__file__)).parent.parent.parent / "tmp" / "ad_screening_voice"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return str(temp_dir / f"tts_{digest}.wav")
     

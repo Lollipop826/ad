@@ -25,7 +25,7 @@ import re
 from pydantic import BaseModel, Field, PrivateAttr
 from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
-from src.llm.http_client_pool import get_siliconflow_chat_openai
+from src.llm.http_client_pool import get_siliconflow_chat_openai, get_volcengine_chat_openai
 
 
 class ResistanceDetectionToolArgs(BaseModel):
@@ -136,15 +136,26 @@ class ResistanceDetectionTool(BaseTool):
         else:
             # 使用API
             try:
-                self._llm = get_siliconflow_chat_openai(
-                    model=model or os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
-                    base_url=base_url,
-                    api_key=api_key,
-                    temperature=temperature,
-                    timeout=10,
-                    max_retries=1,
-                )
-                print("[ResistanceTool] 🔄 使用API LLM")
+                if os.getenv("ARK_API_KEY"):
+                    self._llm = get_volcengine_chat_openai(
+                        model=model or os.getenv("RESISTANCE_MODEL", "doubao-seed-2-0-mini-260215"),
+                        temperature=temperature,
+                        max_tokens=32,
+                        timeout=10,
+                        max_retries=1,
+                    )
+                    print("[ResistanceTool] 🌋 使用火山引擎 (Doubao)")
+                else:
+                    self._llm = get_siliconflow_chat_openai(
+                        model=model or os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
+                        base_url=base_url,
+                        api_key=api_key,
+                        temperature=temperature,
+                        max_tokens=32,
+                        timeout=10,
+                        max_retries=1,
+                    )
+                    print("[ResistanceTool] � 使用SiliconFlow")
             except Exception as e:
                 print(f"[ResistanceTool] ⚠️ API LLM初始化失败: {e}")
         
@@ -298,7 +309,43 @@ class ResistanceDetectionTool(BaseTool):
             }
 
         return None
-    
+
+    def _quick_normal_check(self, answer: str) -> Optional[Dict]:
+        """
+        快速放行明显正常的回答，跳过 LLM 调用。
+        绝大多数回答是正常配合，这里用关键词排除法快速判断。
+        """
+        text = (answer or "").strip()
+        if len(text) < 2:
+            return None  # 太短，交给 LLM 判断
+
+        # 任何负面信号 → 不走快速路径，交给 LLM
+        negative_kw = [
+            "不想", "不要", "不做", "不说", "不聊", "别问", "拒绝", "不愿",
+            "不配合", "不测", "不回答", "烦", "滚", "有完没完", "闭嘴",
+            "害怕", "怕", "担心", "焦虑", "没意思", "活着", "绝望",
+            "不信", "你是谁", "查户口", "骗", "派来的",
+            "丢人", "没面子", "脑子好着", "不用你管",
+            "什么？", "啊？", "再说一遍", "没听清", "没听懂", "说啥",
+            "什么意思", "听不清", "你说什么",
+            "唱反调", "就不",
+        ]
+        if any(kw in text for kw in negative_kw):
+            return None
+
+        # 无负面信号 + 有实质内容（≥4字）→ 正常配合
+        if len(text) >= 4:
+            return {
+                "label": 0,
+                "label_name": LABEL_NAMES[0],
+                "label_zh": LABEL_ZH[0],
+                "confidence": 0.95,
+                "inference_time_ms": 0.0,
+                "method": "rule_normal",
+            }
+
+        return None
+
     def _run(self, question: str = "", answer: str = "", language: str = "zh", **kwargs) -> str:
         """执行抵抗情绪检测"""
         from src.utils.tool_logger import ToolLogger
@@ -331,8 +378,10 @@ class ResistanceDetectionTool(BaseTool):
                 "method": "none"
             }, ensure_ascii=False)
         
-        # 规则优先，避免明显拒答被 LLM 误判成“小抱怨”
+        # 规则优先：拒答 > 正常快速放行 > LLM
         result = self._quick_rule_predict(question, answer)
+        if result is None:
+            result = self._quick_normal_check(answer)
         if result is None:
             result = self._llm_predict(question, answer)
         

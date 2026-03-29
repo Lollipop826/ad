@@ -45,7 +45,7 @@ class VoiceTTS:
         key = f"{version_tag}|{self.voice_name}|{self.rate}|{self.volume}|{text}".encode("utf-8")
         digest = hashlib.sha1(key).hexdigest()
         # 使用外部存储避免系统盘满
-        temp_dir = Path("/root/autodl-tmp/tmp/ad_screening_voice")
+        temp_dir = Path(os.path.dirname(__file__)).parent.parent.parent / "tmp" / "ad_screening_voice"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return str(temp_dir / f"tts_{digest}.wav")
 

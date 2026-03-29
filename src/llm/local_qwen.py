@@ -12,11 +12,11 @@ import threading
 
 # 模型路径配置（支持多模型）
 MODEL_PATHS = {
-    "7b": "/root/autodl-tmp/models/Qwen2.5-7B-Instruct-GPTQ-Int4",      # 7B GPTQ（默认使用量化版）
-    "7b-gptq": "/root/autodl-tmp/models/Qwen2.5-7B-Instruct-GPTQ-Int4",  # 7B Int4量化（快速+准确）⭐
-    "0.5b": "/root/autodl-tmp/models/Qwen2.5-0.5B-Instruct",  # 0.5B FP16（简单任务）
-    "14b": "/root/autodl-tmp/models/Qwen2.5-14B-Instruct-GPTQ-Int4",  # 14B Int4量化
-    "14b-gptq": "/root/autodl-tmp/models/Qwen2.5-14B-Instruct-GPTQ-Int4"  # 14B Int4量化（别名）
+    "7b": "/home/luy/luyang/models/Qwen2.5-7B-Instruct-GPTQ-Int4",      # 7B GPTQ（默认使用量化版）
+    "7b-gptq": "/home/luy/luyang/models/Qwen2.5-7B-Instruct-GPTQ-Int4",  # 7B Int4量化（快速+准确）⭐
+    "0.5b": "/home/luy/luyang/models/Qwen2.5-0.5B-Instruct",  # 0.5B FP16（简单任务）
+    "14b": "/home/luy/luyang/models/Qwen2.5-14B-Instruct-GPTQ-Int4",  # 14B Int4量化
+    "14b-gptq": "/home/luy/luyang/models/Qwen2.5-14B-Instruct-GPTQ-Int4"  # 14B Int4量化（别名）
 }
 
 # 默认模型
@@ -209,34 +209,34 @@ class LocalQwenLLM(LLM):
         # 🔥 性能优化：移除 _global_generate_lock，只保留 per-model lock
         # 原来的双层锁让所有本地推理串行化，API+Local 无法并行
         # per-model lock 已足够保证同一模型的 CUDA 安全
-            with model_lock:
-                with torch.no_grad():
-                    try:
+        with model_lock:
+            with torch.no_grad():
+                try:
+                    outputs = model.generate(
+                        **inputs,
+                        max_new_tokens=self.max_new_tokens,
+                        temperature=max(0.3, min(safe_temperature, 1.0)),
+                        top_p=max(0.3, min(safe_top_p, 0.9)),
+                        top_k=20,
+                        do_sample=True,
+                        repetition_penalty=1.02,
+                        pad_token_id=tokenizer.eos_token_id,
+                        stopping_criteria=stopping_criteria,
+                        logits_processor=logits_processor,
+                    )
+                except RuntimeError as e:
+                    if "probability tensor" in str(e):
+                        print(f"[LocalQwen] ⚠️ 稳定化生成失败，降级到贪婪解码: {e}")
                         outputs = model.generate(
                             **inputs,
-                            max_new_tokens=self.max_new_tokens,
-                            temperature=max(0.3, min(safe_temperature, 1.0)),
-                            top_p=max(0.3, min(safe_top_p, 0.9)),
-                            top_k=20,
-                            do_sample=True,
-                            repetition_penalty=1.02,
+                            max_new_tokens=min(self.max_new_tokens, 200),
+                            do_sample=False,
                             pad_token_id=tokenizer.eos_token_id,
                             stopping_criteria=stopping_criteria,
                             logits_processor=logits_processor,
                         )
-                    except RuntimeError as e:
-                        if "probability tensor" in str(e):
-                            print(f"[LocalQwen] ⚠️ 稳定化生成失败，降级到贪婪解码: {e}")
-                            outputs = model.generate(
-                                **inputs,
-                                max_new_tokens=min(self.max_new_tokens, 200),
-                                do_sample=False,
-                                pad_token_id=tokenizer.eos_token_id,
-                                stopping_criteria=stopping_criteria,
-                                logits_processor=logits_processor,
-                            )
-                        else:
-                            raise e
+                    else:
+                        raise e
         
         # 解码
         generated_ids = outputs[0][len(inputs.input_ids[0]):]

@@ -284,10 +284,19 @@ class ScoreRecordingTool(BaseTool):
         # 统计各维度表现
         dimension_summary = {}
         for dim_id, dim_data in dimensions.items():
+            records = dim_data.get("records") or []
+            latest_quality = None
+            latest_cognitive = dim_data.get("latest_performance", "未评估")
+            if records:
+                last_rec = records[-1]
+                latest_quality = last_rec.get("quality_level")
+                latest_cognitive = last_rec.get("cognitive_performance", latest_cognitive)
             dimension_summary[dim_id] = {
                 "attempts": dim_data.get("attempts", 0),
                 "latest_performance": dim_data.get("latest_performance", "未评估"),
-                "overall_status": dim_data.get("overall_status", "未评估")
+                "overall_status": dim_data.get("overall_status", "未评估"),
+                "latest_quality_level": latest_quality,
+                "latest_cognitive_performance": latest_cognitive,
             }
         
         result = ScoreRecordingResult(

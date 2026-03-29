@@ -10,7 +10,7 @@ import os
 from pydantic import BaseModel, Field, PrivateAttr
 from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
-from src.llm.http_client_pool import get_siliconflow_chat_openai
+from src.llm.http_client_pool import get_siliconflow_chat_openai, get_volcengine_chat_openai
 
 from src.tools.retrieval.paragraph_retrieval import paragraph_retrieval
 from src.tools.retrieval.sentence_filter import SentenceFilter, split_sentences
@@ -76,12 +76,20 @@ class KnowledgeRetrievalTool(BaseTool):
         """初始化RAG Fusion组件"""
         try:
             # 初始化LLM
-            self._llm = get_siliconflow_chat_openai(
-                model=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
-                temperature=0.3,
-                timeout=15,
-                max_retries=1,
-            )
+            if os.getenv("ARK_API_KEY"):
+                self._llm = get_volcengine_chat_openai(
+                    model=os.getenv("RETRIEVAL_MODEL", "doubao-seed-2-0-mini-260215"),
+                    temperature=0.3,
+                    timeout=15,
+                    max_retries=1,
+                )
+            else:
+                self._llm = get_siliconflow_chat_openai(
+                    model=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
+                    temperature=0.3,
+                    timeout=15,
+                    max_retries=1,
+                )
             
             # 初始化精排器（如果需要）
             if self.fusion_enable_reranking:

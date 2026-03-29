@@ -37,7 +37,7 @@ class CosyVoiceTTS:
             device: GPU设备，例如 'gpu:0' 或 'cpu'
         """
         # 添加 PaddleSpeech 源码路径
-        ps_path = "/root/autodl-tmp/langchain-mcp-adapters-main/PaddleSpeech"
+        ps_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'PaddleSpeech')
         if ps_path not in sys.path:
             sys.path.insert(0, ps_path)
         
@@ -190,7 +190,7 @@ class CosyVoiceTTS:
         version_tag = "paddlespeech_v1"
         key = f"{version_tag}|{emotion}|{text}".encode("utf-8")
         digest = hashlib.sha1(key).hexdigest()
-        temp_dir = Path("/root/autodl-tmp/tmp/ad_screening_voice")
+        temp_dir = Path(os.path.dirname(__file__)).parent.parent.parent / "tmp" / "ad_screening_voice"
         temp_dir.mkdir(parents=True, exist_ok=True)
         return str(temp_dir / f"tts_{digest}.wav")
     

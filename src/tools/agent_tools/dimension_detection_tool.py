@@ -15,7 +15,7 @@ from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from src.domain.dimensions import MMSE_DIMENSIONS
-from src.llm.http_client_pool import get_siliconflow_chat_openai
+from src.llm.http_client_pool import get_siliconflow_chat_openai, get_volcengine_chat_openai
 
 
 class DimensionDetectionToolArgs(BaseModel):
@@ -81,14 +81,22 @@ class DimensionDetectionTool(BaseTool):
             self._llm = get_pooled_llm(pool_key='small_classify')  # 🔥 使用 0.5B 小模型，加速 10-15倍
         else:
             # 使用API
-            self._llm = get_siliconflow_chat_openai(
-                model=model or os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
-                base_url=base_url,
-                api_key=api_key,
-                temperature=temperature,
-                timeout=20,
-                max_retries=1,
-            )
+            if os.getenv("ARK_API_KEY"):
+                self._llm = get_volcengine_chat_openai(
+                    model=model or os.getenv("DIMENSION_MODEL", "doubao-seed-2-0-mini-260215"),
+                    temperature=temperature,
+                    timeout=20,
+                    max_retries=1,
+                )
+            else:
+                self._llm = get_siliconflow_chat_openai(
+                    model=model or os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
+                    base_url=base_url,
+                    api_key=api_key,
+                    temperature=temperature,
+                    timeout=20,
+                    max_retries=1,
+                )
         
         self._system_prompt = (
             "你是阿尔茨海默病初筛对话助手。根据给定的维度表(MMSE)，"

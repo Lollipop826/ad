@@ -2,9 +2,10 @@
 统一工具日志系统
 提供醒目、结构化的日志输出，清晰展示工具执行流程和数据传递
 """
+import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from contextlib import contextmanager
 
 
@@ -33,6 +34,7 @@ class ToolLogger:
         self._start_time = None
         self._inputs = {}
         self._outputs = {}
+        self._log_id = f"{tool_name}_{int(time.time() * 1000)}_{id(self)}"
     
     def start(self, **inputs):
         """开始工具执行，记录输入"""
@@ -53,6 +55,17 @@ class ToolLogger:
                     str_val = str_val[:47] + "..."
                 print(f"     ├── {key}: {str_val}")
         
+        emit_tool_event(
+            {
+                "phase": "start",
+                "log_id": self._log_id,
+                "tool_name": self.tool_name,
+                "icon": self.icon,
+                "timestamp": now,
+                "inputs": _truncate_dict(inputs, 120),
+            }
+        )
+        
         return self
     
     def log(self, message: str, level: str = "info"):
@@ -60,10 +73,29 @@ class ToolLogger:
         icons = {"info": "ℹ️", "warn": "⚠️", "error": "❌", "success": "✅", "step": "  ├──"}
         icon = icons.get(level, "  │  ")
         print(f"  {icon} {message}")
+        emit_tool_event(
+            {
+                "phase": "log",
+                "log_id": self._log_id,
+                "tool_name": self.tool_name,
+                "icon": self.icon,
+                "level": level,
+                "message": str(message),
+            }
+        )
     
     def step(self, message: str):
         """记录执行步骤"""
         print(f"  ├── {message}")
+        emit_tool_event(
+            {
+                "phase": "step",
+                "log_id": self._log_id,
+                "tool_name": self.tool_name,
+                "icon": self.icon,
+                "message": str(message),
+            }
+        )
     
     def end(self, **outputs):
         """结束工具执行，记录输出和耗时"""
@@ -80,6 +112,16 @@ class ToolLogger:
         
         print(f"  ⏱️  耗时: {elapsed:.3f}s")
         print(f"╚{'═'*60}╝")
+        emit_tool_event(
+            {
+                "phase": "end",
+                "log_id": self._log_id,
+                "tool_name": self.tool_name,
+                "icon": self.icon,
+                "elapsed_s": round(elapsed, 3),
+                "outputs": _truncate_dict(outputs, 120),
+            }
+        )
         
         return outputs
     
@@ -117,6 +159,69 @@ def log_tool_start(tool_name: str, **inputs) -> ToolLogger:
     logger = ToolLogger(tool_name)
     logger.start(**inputs)
     return logger
+
+
+_EVENT_CALLBACKS: Dict[str, Callable[[Dict[str, Any]], None]] = {}
+_SCORE_CALLBACKS: Dict[str, Callable[[str], None]] = {}
+_CONTEXT = threading.local()
+
+
+def _truncate_value(value: Any, max_len: int = 120) -> str:
+    text = str(value)
+    if len(text) > max_len:
+        return text[: max_len - 3] + "..."
+    return text
+
+
+def _truncate_dict(data: Dict[str, Any], max_len: int = 120) -> Dict[str, str]:
+    return {str(k): _truncate_value(v, max_len) for k, v in (data or {}).items()}
+
+
+def register_tool_event_callback(session_id: str, callback: Callable[[Dict[str, Any]], None]) -> None:
+    _EVENT_CALLBACKS[session_id] = callback
+
+
+def unregister_tool_event_callback(session_id: str) -> None:
+    _EVENT_CALLBACKS.pop(session_id, None)
+
+
+def register_score_event_callback(session_id: str, callback: Callable[[str], None]) -> None:
+    _SCORE_CALLBACKS[session_id] = callback
+
+
+def unregister_score_event_callback(session_id: str) -> None:
+    _SCORE_CALLBACKS.pop(session_id, None)
+
+
+def emit_score_event(session_id: str) -> None:
+    callback = _SCORE_CALLBACKS.get(session_id)
+    if not callback:
+        return
+    try:
+        callback(session_id)
+    except Exception:
+        pass
+
+
+def set_current_tool_log_session(session_id: Optional[str]) -> None:
+    _CONTEXT.session_id = session_id
+
+
+def get_current_tool_log_session() -> Optional[str]:
+    return getattr(_CONTEXT, "session_id", None)
+
+
+def emit_tool_event(event: Dict[str, Any]) -> None:
+    session_id = get_current_tool_log_session()
+    if not session_id:
+        return
+    callback = _EVENT_CALLBACKS.get(session_id)
+    if not callback:
+        return
+    try:
+        callback(dict(event, session_id=session_id))
+    except Exception:
+        pass
 
 
 def log_data_flow(from_tool: str, to_tool: str, data: str):

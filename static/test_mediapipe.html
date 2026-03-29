@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MediaPipe 视觉检测测试</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px; }
+  h1 { text-align: center; font-size: 1.5rem; margin-bottom: 8px; color: #38bdf8; }
+  .subtitle { text-align: center; font-size: 0.85rem; color: #64748b; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .card { background: #1e293b; border-radius: 12px; padding: 16px; border: 1px solid #334155; }
+  .card h2 { font-size: 1rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .video-wrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 8px; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .overlay { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.7); padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; }
+  .controls { display: flex; gap: 8px; margin-top: 12px; }
+  button { flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+  button:hover { transform: translateY(-1px); }
+  .btn-start { background: #22c55e; color: #fff; }
+  .btn-start:hover { background: #16a34a; }
+  .btn-stop { background: #ef4444; color: #fff; }
+  .btn-stop:hover { background: #dc2626; }
+  .btn-snap { background: #3b82f6; color: #fff; }
+  .btn-snap:hover { background: #2563eb; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .result-box { margin-top: 12px; background: #0f172a; border-radius: 8px; padding: 12px; min-height: 80px; font-size: 0.85rem; line-height: 1.6; }
+  .result-box .label { color: #94a3b8; }
+  .result-box .value { font-weight: 600; }
+  .correct { color: #22c55e; }
+  .incorrect { color: #ef4444; }
+  .unknown { color: #f59e0b; }
+  .pending { color: #64748b; }
+  .log-area { grid-column: 1 / -1; background: #1e293b; border-radius: 12px; padding: 16px; border: 1px solid #334155; }
+  .log-area h2 { font-size: 1rem; margin-bottom: 8px; }
+  #log { background: #0f172a; border-radius: 8px; padding: 12px; height: 200px; overflow-y: auto; font-family: 'Fira Code', monospace; font-size: 0.78rem; line-height: 1.5; color: #94a3b8; }
+  #log .ts { color: #475569; }
+  #log .ok { color: #22c55e; }
+  #log .err { color: #ef4444; }
+  #log .info { color: #38bdf8; }
+  .mode-toggle { display: flex; gap: 8px; margin-bottom: 16px; justify-content: center; }
+  .mode-btn { padding: 6px 16px; border-radius: 20px; border: 1px solid #334155; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.85rem; }
+  .mode-btn.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+  .stat { display: inline-block; background: #334155; padding: 2px 8px; border-radius: 4px; margin: 2px; font-size: 0.78rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔬 MediaPipe 视觉检测测试</h1>
+  <p class="subtitle">测试闭眼检测 (EAR) 和手势"5"检测 — 本地 CPU 推理，零 API 调用</p>
+
+  <div class="mode-toggle">
+    <button class="mode-btn active" onclick="setMode('snap')" id="mode-snap">📸 拍照模式</button>
+    <button class="mode-btn" onclick="setMode('video')" id="mode-video">🎬 录制模式</button>
+    <button class="mode-btn" onclick="setMode('realtime')" id="mode-realtime">⚡ 实时模式</button>
+  </div>
+
+  <div class="grid">
+    <!-- 闭眼检测 -->
+    <div class="card">
+      <h2>👁️ 闭眼检测</h2>
+      <div class="video-wrap">
+        <video id="video1" autoplay playsinline muted></video>
+        <div class="overlay" id="status1">待机</div>
+      </div>
+      <div class="controls">
+        <button class="btn-snap" onclick="snapTest('language_reading_close_eyes')" id="snap1">📸 拍照检测</button>
+        <button class="btn-start" onclick="startRecord('language_reading_close_eyes')" id="rec1">🔴 录制5s</button>
+      </div>
+      <div class="result-box" id="result1">
+        <span class="pending">请点击按钮开始检测...</span>
+      </div>
+    </div>
+
+    <!-- 手势5检测 -->
+    <div class="card">
+      <h2>🖐️ 手势"5"检测</h2>
+      <div class="video-wrap">
+        <video id="video2" autoplay playsinline muted></video>
+        <div class="overlay" id="status2">待机</div>
+      </div>
+      <div class="controls">
+        <button class="btn-snap" onclick="snapTest('language_3step_action')" id="snap2">📸 拍照检测</button>
+        <button class="btn-start" onclick="startRecord('language_3step_action')" id="rec2">🔴 录制5s</button>
+      </div>
+      <div class="result-box" id="result2">
+        <span class="pending">请点击按钮开始检测...</span>
+      </div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="log-area">
+      <h2>📋 检测日志</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/vision-evaluate';
+let stream = null;
+let mode = 'snap'; // snap | video | realtime
+let realtimeTimer = null;
+let mediaRecorder = null;
+
+// ─── 初始化摄像头 ───
+async function initCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' },
+      audio: false,
+    });
+    document.getElementById('video1').srcObject = stream;
+    document.getElementById('video2').srcObject = stream;
+    log('摄像头已启动', 'ok');
+  } catch (e) {
+    log('摄像头启动失败: ' + e.message, 'err');
+  }
+}
+
+// ─── 模式切换 ───
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mode-' + m).classList.add('active');
+
+  // 停止实时模式
+  if (realtimeTimer) { clearInterval(realtimeTimer); realtimeTimer = null; }
+
+  if (m === 'realtime') {
+    startRealtime();
+  }
+
+  log('切换到 ' + {snap: '拍照', video: '录制', realtime: '实时'}[m] + ' 模式', 'info');
+}
+
+// ─── 拍照检测 ───
+async function snapTest(taskId) {
+  const idx = taskId === 'language_reading_close_eyes' ? 1 : 2;
+  setStatus(idx, '拍照中...');
+
+  // 连拍3帧（间隔200ms）提高准确率
+  const frames = [];
+  for (let i = 0; i < 3; i++) {
+    frames.push(captureFrame());
+    if (i < 2) await sleep(200);
+  }
+
+  setStatus(idx, '检测中...');
+  const t0 = performance.now();
+
+  try {
+    const resp = await fetch(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, frames: frames }),
+    });
+    const data = await resp.json();
+    const ms = (performance.now() - t0).toFixed(0);
+    showResult(idx, data, ms);
+    log(`[${taskName(taskId)}] 拍照检测 ${ms}ms — ${data.is_correct ? '✅' : '❌'} ${data.evaluation_detail || ''}`, data.is_correct ? 'ok' : 'err');
+  } catch (e) {
+    setStatus(idx, '错误');
+    log(`[${taskName(taskId)}] 请求失败: ${e.message}`, 'err');
+  }
+}
+
+// ─── 录制检测 ───
+function startRecord(taskId) {
+  const idx = taskId === 'language_reading_close_eyes' ? 1 : 2;
+  const btn = document.getElementById('rec' + idx);
+
+  if (!stream) { log('摄像头未启动', 'err'); return; }
+
+  const chunks = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = async () => {
+    btn.disabled = false;
+    btn.textContent = '🔴 录制5s';
+    setStatus(idx, '上传中...');
+
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const b64 = await blobToBase64(blob);
+    const t0 = performance.now();
+
+    try {
+      const resp = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId, video: b64, mime_type: 'video/webm' }),
+      });
+      const data = await resp.json();
+      const ms = (performance.now() - t0).toFixed(0);
+      showResult(idx, data, ms);
+      log(`[${taskName(taskId)}] 录制检测 ${ms}ms — ${data.is_correct ? '✅' : '❌'} ${data.evaluation_detail || ''}`, data.is_correct ? 'ok' : 'err');
+    } catch (e) {
+      setStatus(idx, '错误');
+      log(`[${taskName(taskId)}] 请求失败: ${e.message}`, 'err');
+    }
+  };
+
+  mediaRecorder.start();
+  btn.disabled = true;
+  setStatus(idx, '录制中 5s...');
+  let countdown = 5;
+  btn.textContent = `⏳ ${countdown}s`;
+  const timer = setInterval(() => {
+    countdown--;
+    btn.textContent = `⏳ ${countdown}s`;
+    if (countdown <= 0) {
+      clearInterval(timer);
+      mediaRecorder.stop();
+    }
+  }, 1000);
+}
+
+// ─── 实时模式 ───
+function startRealtime() {
+  log('实时模式启动（每1.5秒检测一次）', 'info');
+  realtimeTimer = setInterval(async () => {
+    const frame = captureFrame();
+    const t0 = performance.now();
+    // 同时测两个任务
+    const [r1, r2] = await Promise.all([
+      fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: 'language_reading_close_eyes', frames: [frame] }) }).then(r => r.json()),
+      fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: 'language_3step_action', frames: [frame] }) }).then(r => r.json()),
+    ]);
+    const ms = (performance.now() - t0).toFixed(0);
+    showResult(1, r1, ms);
+    showResult(2, r2, ms);
+  }, 1500);
+}
+
+// ─── 工具函数 ───
+function captureFrame() {
+  const video = document.getElementById('video1');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  return canvas.toDataURL('image/jpeg', 0.8);
+}
+
+function blobToBase64(blob) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function taskName(id) {
+  return id === 'language_reading_close_eyes' ? '闭眼' : '手势5';
+}
+
+function setStatus(idx, text) {
+  document.getElementById('status' + idx).textContent = text;
+}
+
+function showResult(idx, data, ms) {
+  const box = document.getElementById('result' + idx);
+  const correct = data.is_correct;
+  const cls = correct === true ? 'correct' : correct === false ? 'incorrect' : 'unknown';
+  const icon = correct === true ? '✅' : correct === false ? '❌' : '❓';
+  const status_text = correct === true ? '正确' : correct === false ? '未通过' : '无法判断';
+
+  box.innerHTML = `
+    <div><span class="label">结果: </span><span class="value ${cls}">${icon} ${status_text}</span></div>
+    <div><span class="label">质量: </span><span class="value">${data.quality_level || '-'}</span></div>
+    <div><span class="label">详情: </span><span class="value">${data.evaluation_detail || '-'}</span></div>
+    <div>
+      <span class="stat">⏱ ${ms}ms</span>
+      <span class="stat">🔧 ${data.source || '-'}</span>
+      <span class="stat">📊 ${(data.confidence * 100).toFixed(0)}%</span>
+    </div>
+  `;
+  setStatus(idx, status_text);
+}
+
+function log(msg, type = '') {
+  const el = document.getElementById('log');
+  const ts = new Date().toLocaleTimeString();
+  el.innerHTML += `<div><span class="ts">[${ts}]</span> <span class="${type}">${msg}</span></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+// ─── 启动 ───
+initCamera();
+</script>
+</body>
+</html>

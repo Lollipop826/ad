@@ -13,7 +13,7 @@ import json
 from pydantic import BaseModel, Field, PrivateAttr
 from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
-from src.llm.http_client_pool import get_siliconflow_chat_openai
+from src.llm.http_client_pool import get_siliconflow_chat_openai, get_volcengine_chat_openai
 
 
 class ComfortResponseToolArgs(BaseModel):
@@ -87,17 +87,27 @@ class ComfortResponseTool(BaseTool):
     ):
         super().__init__(**kwargs)
         
-        # 🔥 强制使用 API（共享 ChatOpenAI + 共享 httpx 连接池）
-        print("[ComfortTool] 🚀 复用共享 ChatOpenAI + SiliconFlow API")
-        self._llm = get_siliconflow_chat_openai(
-            model=model or os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
-            base_url=base_url,
-            api_key=api_key,
-            temperature=temperature,
-            max_tokens=150,
-            timeout=20,
-            max_retries=1,
-        )
+        # 🔥 自动选择 LLM 提供商
+        if os.getenv("ARK_API_KEY"):
+            print("[ComfortTool] 🌋 使用火山引擎 (Doubao)")
+            self._llm = get_volcengine_chat_openai(
+                model=model or os.getenv("COMFORT_TOOL_MODEL", "doubao-seed-2-0-lite-260215"),
+                temperature=temperature,
+                max_tokens=150,
+                timeout=20,
+                max_retries=1,
+            )
+        else:
+            print("[ComfortTool] � 使用 SiliconFlow")
+            self._llm = get_siliconflow_chat_openai(
+                model=model or os.getenv("COMFORT_TOOL_MODEL", "Qwen/Qwen2.5-72B-Instruct"),
+                base_url=base_url,
+                api_key=api_key,
+                temperature=temperature,
+                max_tokens=150,
+                timeout=20,
+                max_retries=1,
+            )
         
         # 🎯 针对不同抵抗类别的专属提示词（4类体系）
         # 每个类别独立prompt，语气要像晚辈/邻居跟老人聊天
@@ -363,24 +373,27 @@ class ComfortResponseTool(BaseTool):
                 self._category_prompts.get("anger", "")
             )
             
-            # 🔥 合并 prompt：一次调用同时完成话题选择+安慰语生成
+            # 🔥 合并 prompt：一次调用同时完成安慰语生成+话题选择
             combined_prompt = (
                 f"{category_prompt}\n\n"
                 f"{self._base_prompt}\n\n"
                 f"{context_desc}"
-                f"🚨 任务：\n"
-                f"1. 先根据上下文选一个轻松话题（避开已用话题：{used_topics_str}）\n"
-                f"2. 按策略安抚情绪，自然过渡到该话题\n"
+                f"🚨 任务（严格按顺序）：\n"
+                f"1. 【最重要】先回应老人的情绪，按上面的策略示例风格安抚。\n"
+                f"   - 如果是 hostility，reply 必须以认怂/道歉开头（如“行行行，不问了”“是我多嘴了”）\n"
+                f"   - 如果是 avoidance，reply 必须先顺着说/夸两句\n"
+                f"   - 如果是 distress，reply 必须先给温暖和陪伴\n"
+                f"2. 然后再自然地转到一个轻松话题（避开已用话题：{used_topics_str}）\n"
                 f"3. 话题要适合老年人（日常、天气、饮食、电视、兴趣爱好）\n"
-                f"4. 严禁臆造具体经历或场景（例如“咱们村的老槐树”）；"
-                f"如无明确信息，只能问泛化问题\n\n"
+                f"4. 严禁臆造具体经历或场景；如无明确信息，只能问泛化问题\n\n"
+                f"【禁止】reply 不能跳过安抚直接转话题！必须先有情绪回应再过渡。\n\n"
                 f"输出格式（严格JSON）：\n"
-                f'{{\"topic\": \"选中的话题\", \"reply\": \"安慰+转场的回复\"}}'
+                f'{{"topic": "选中的话题", "reply": "先安抚再转场的回复"}}'
             )
             
             user_prompt = f"患者说：「{patient_answer or '不想回答'}」\n情绪：{resistance_category}"
             if full_honorific:
-                user_prompt += f"\n称呼：{full_honorific}（必须使用此称呼）"
+                user_prompt += f"\n🚨称呼规则：全程只能用'{full_honorific}'称呼对方，严禁使用其他任何变体"
             
             response = self._llm.invoke([
                 {"role": "system", "content": combined_prompt},

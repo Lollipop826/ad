@@ -7,7 +7,7 @@
 3. 启用 Keep-Alive
 """
 import httpx
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 from functools import lru_cache
 
 
@@ -103,6 +103,7 @@ def get_siliconflow_chat_openai(
     streaming: bool = False,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    disable_thinking: bool = False,
 ):
     """
     获取共享的 SiliconFlow ChatOpenAI 实例（按配置缓存）。
@@ -112,7 +113,8 @@ def get_siliconflow_chat_openai(
     - 复用同一个 httpx.Client / httpx.AsyncClient（连接池 + Keep-Alive）
     
     注意：
-    - 不同参数（model/temperature/max_tokens/timeout/streaming）会生成不同缓存实例
+    - 不同参数（model/temperature/max_tokens/timeout/streaming/disable_thinking）会生成不同缓存实例
+    - disable_thinking=True 会关闭 Qwen3 等模型的思考模式（大幅降低延迟）
     """
     import os
     from langchain_openai import ChatOpenAI
@@ -136,11 +138,224 @@ def get_siliconflow_chat_openai(
     )
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    if disable_thinking:
+        kwargs["extra_body"] = {"enable_thinking": False}
+
+    llm = ChatOpenAI(**kwargs)
+    thinking_info = " thinking=OFF" if disable_thinking else ""
+    print(
+        f"[HTTPClient] ✅ 创建共享 ChatOpenAI: model={model} temp={temperature} "
+        f"max_tokens={max_tokens} streaming={streaming} timeout={timeout}{thinking_info}"
+    )
+    return llm
+
+
+@lru_cache(maxsize=32)
+def get_volcengine_chat_openai(
+    model: str,
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    timeout: Any = 30,
+    max_retries: int = 1,
+    streaming: bool = False,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    disable_thinking: bool = True,
+):
+    """
+    获取共享的火山引擎 ChatOpenAI 实例（按配置缓存）。
+    
+    火山引擎 Doubao 模型默认开启深度思考，必须显式关闭，否则 content 为空。
+    关闭方式：extra_body={"thinking": {"type": "disabled"}}
+    """
+    import os
+    from langchain_openai import ChatOpenAI
+
+    http_client = get_shared_httpx_client()
+    http_async_client = get_shared_async_httpx_client()
+
+    _base_url = base_url or os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+    _api_key = api_key or os.getenv("ARK_API_KEY")
+
+    kwargs = dict(
+        model=model,
+        base_url=_base_url,
+        api_key=_api_key,
+        temperature=temperature,
+        timeout=timeout,
+        max_retries=max_retries,
+        streaming=streaming,
+        http_client=http_client,
+        http_async_client=http_async_client,
+    )
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    if disable_thinking:
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
+    llm = ChatOpenAI(**kwargs)
+    thinking_info = " thinking=OFF" if disable_thinking else ""
+    print(
+        f"[HTTPClient] ✅ 创建火山引擎 ChatOpenAI: model={model} temp={temperature} "
+        f"max_tokens={max_tokens} streaming={streaming} timeout={timeout}{thinking_info}"
+    )
+    return llm
+
+
+def get_chat_openai(
+    model: str = None,
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    timeout: Any = 30,
+    max_retries: int = 1,
+    streaming: bool = False,
+    disable_thinking: bool = True,
+):
+    """
+    自动选择 LLM 提供商：
+    - 有 ARK_API_KEY → 火山引擎 (Doubao)，model 默认 doubao-seed-2-0-mini-260215
+    - 否则 → SiliconFlow (Qwen)，model 默认 Qwen/Qwen3-30B-A3B-Instruct-2507
+    """
+    import os
+    if os.getenv("ARK_API_KEY"):
+        _model = model or os.getenv("TOPIC_SELECTION_MODEL", "doubao-seed-2-0-mini-260215")
+        return get_volcengine_chat_openai(
+            model=_model, temperature=temperature, max_tokens=max_tokens,
+            timeout=timeout, max_retries=max_retries, streaming=streaming,
+            disable_thinking=disable_thinking,
+        )
+    else:
+        _model = model or os.getenv("TOPIC_SELECTION_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
+        return get_siliconflow_chat_openai(
+            model=_model, temperature=temperature, max_tokens=max_tokens,
+            timeout=timeout, max_retries=max_retries, streaming=streaming,
+            disable_thinking=disable_thinking,
+        )
+
+
+# ============================================================
+# 🔥 VolcEngine Context Cache API（缓存 system prompt 减少延迟和 token 消耗）
+# ============================================================
+_context_cache_ids: Dict[str, str] = {}  # cache_key → context_id
+
+
+def create_volcengine_context_cache(
+    model: str,
+    system_prompt: str,
+    mode: str = "session",
+    ttl: int = 3600,
+) -> Optional[str]:
+    """
+    创建火山引擎上下文缓存，返回 context_id。
+    
+    - common_prefix 模式：缓存 system prompt，后续调用自动复用
+    - 相同 model + system_prompt 不会重复创建
+    - 返回 None 表示创建失败（不影响正常调用，降级为普通模式）
+    """
+    import os
+    api_key = os.getenv("ARK_API_KEY")
+    if not api_key:
+        return None
+
+    # 环境变量开关：默认关闭（doubao-seed 系列不支持 Context Cache）
+    if os.getenv("USE_CONTEXT_CACHE", "false").lower() != "true":
+        return None
+
+    # Context Cache 只对推理接入点（ep-xxx）有效，普通模型名直接跳过
+    if not model.startswith("ep-"):
+        return None
+
+    cache_key = f"{model}:{hash(system_prompt)}"
+    if cache_key in _context_cache_ids:
+        print(f"[ContextCache] ♻️ 复用已有缓存: {_context_cache_ids[cache_key]}")
+        return _context_cache_ids[cache_key]
+
+    base_url = os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+    url = f"{base_url}/context/create"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": system_prompt}],
+        "mode": mode,
+        "ttl": ttl,
+    }
+
+    try:
+        client = get_shared_httpx_client()
+        resp = client.post(url, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        context_id = data.get("id")
+        if context_id:
+            _context_cache_ids[cache_key] = context_id
+            cached_tokens = data.get("usage", {}).get("prompt_tokens", 0)
+            print(
+                f"[ContextCache] ✅ 创建成功: model={model}, "
+                f"context_id={context_id}, cached_tokens={cached_tokens}, "
+                f"mode={mode}, ttl={ttl}s"
+            )
+            return context_id
+        else:
+            print(f"[ContextCache] ⚠️ 响应中无 id: {data}")
+            return None
+    except Exception as e:
+        print(f"[ContextCache] ❌ 创建失败（降级为普通模式）: {e}")
+        return None
+
+
+def get_volcengine_context_chat_openai(
+    context_id: str,
+    model: str,
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    timeout: Any = 30,
+    max_retries: int = 1,
+    streaming: bool = False,
+) -> 'ChatOpenAI':
+    """
+    获取使用上下文缓存的火山引擎 ChatOpenAI 实例。
+    
+    base_url 指向 /api/v3/context，LangChain 自动拼接 /chat/completions
+    → 最终请求 /api/v3/context/chat/completions
+    
+    extra_body 中携带 context_id + thinking disabled。
+    调用时无需再传 system message。
+    """
+    import os
+    from langchain_openai import ChatOpenAI
+
+    http_client = get_shared_httpx_client()
+    http_async_client = get_shared_async_httpx_client()
+
+    base_url = os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+    context_base_url = f"{base_url}/context"
+    api_key = os.getenv("ARK_API_KEY")
+
+    kwargs = dict(
+        model=model,
+        base_url=context_base_url,
+        api_key=api_key,
+        temperature=temperature,
+        timeout=timeout,
+        max_retries=max_retries,
+        streaming=streaming,
+        http_client=http_client,
+        http_async_client=http_async_client,
+        extra_body={
+            "context_id": context_id,
+            "thinking": {"type": "disabled"},
+        },
+    )
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
 
     llm = ChatOpenAI(**kwargs)
     print(
-        f"[HTTPClient] ✅ 创建共享 ChatOpenAI: model={model} temp={temperature} "
-        f"max_tokens={max_tokens} streaming={streaming} timeout={timeout}"
+        f"[ContextCache] ✅ 创建 Context ChatOpenAI: model={model} "
+        f"context_id={context_id} temp={temperature} max_tokens={max_tokens}"
     )
     return llm
 

@@ -1,6 +1,7 @@
 """
 Embedding 模型池 - 单例模式，避免重复加载
 """
+import os
 import time
 from typing import Optional
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -22,8 +23,8 @@ class EmbeddingPool:
         if not EmbeddingPool._initialized:
             print("[EmbeddingPool] 🚀 初始化 Embedding 模型池...")
             
-            # 默认使用 BGE-M3 模型（稳定本地路径）
-            self.model_path = "/root/autodl-tmp/models/bge-m3"
+            # 默认使用 BGE-M3 模型；优先读取环境变量 EMBEDDING_MODEL_PATH，否则用本地路径
+            self.model_path = os.getenv("EMBEDDING_MODEL_PATH", "/home/luy/luyang/models/bge-m3")
             self.device = "cuda"  # 或 "cpu"
             
             # 预加载模型
@@ -43,6 +44,7 @@ class EmbeddingPool:
         """加载 Embedding 模型"""
         EmbeddingPool._embedding_model = HuggingFaceEmbeddings(
             model_name=self.model_path,
+            # 使用本地模型文件，不从网上下载
             model_kwargs={"device": self.device, "local_files_only": True},
             encode_kwargs={"normalize_embeddings": True}
         )

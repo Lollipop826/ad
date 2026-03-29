@@ -138,14 +138,25 @@ class DimensionSwitchTool(BaseTool):
             self._llm = get_pooled_llm(pool_key='small_eval')
             print("[DimensionSwitchTool] 🏠 使用本地模型 (small_eval - 0.5B 快速)")
         else:
-            from src.llm.http_client_pool import get_siliconflow_chat_openai
-            self._llm = get_siliconflow_chat_openai(
-                model="Qwen/Qwen2.5-7B-Instruct",
-                temperature=0.1,  # 低温度，更确定性
-                max_tokens=300,
-                timeout=10,
-                max_retries=1,
-            )
+            import os as _os
+            if _os.getenv("ARK_API_KEY"):
+                from src.llm.http_client_pool import get_volcengine_chat_openai
+                self._llm = get_volcengine_chat_openai(
+                    model="doubao-seed-2-0-mini-260215",
+                    temperature=0.1,
+                    max_tokens=300,
+                    timeout=10,
+                    max_retries=1,
+                )
+            else:
+                from src.llm.http_client_pool import get_siliconflow_chat_openai
+                self._llm = get_siliconflow_chat_openai(
+                    model="Qwen/Qwen2.5-7B-Instruct",
+                    temperature=0.1,
+                    max_tokens=300,
+                    timeout=10,
+                    max_retries=1,
+                )
     
     def _extract_response(self, response) -> str:
         """从 LLM 响应中提取文本"""

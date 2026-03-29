@@ -12,7 +12,12 @@ from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from src.utils.location_service import get_realtime_context
-from src.llm.http_client_pool import get_siliconflow_chat_openai
+from src.llm.http_client_pool import (
+    get_siliconflow_chat_openai,
+    get_volcengine_chat_openai,
+    create_volcengine_context_cache,
+    get_volcengine_context_chat_openai,
+)
 
 
 class QuestionGenerationToolArgs(BaseModel):
@@ -65,6 +70,12 @@ class QuestionGenerationTool(BaseTool):
     _balanced_model: Optional[str] = PrivateAttr(default=None)
     _fast_model: Optional[str] = PrivateAttr(default=None)
     _fast_dimensions: set = PrivateAttr(default_factory=set)
+    _context_id: Optional[str] = PrivateAttr(default=None)
+    _context_llm: Optional[ChatOpenAI] = PrivateAttr(default=None)
+    _context_cache_tried: bool = PrivateAttr(default=False)
+    _llm_temperature: float = PrivateAttr(default=0.7)
+    _llm_max_tokens: int = PrivateAttr(default=160)
+    _llm_timeout: float = PrivateAttr(default=20.0)
     
     def __init__(
         self,
@@ -80,12 +91,27 @@ class QuestionGenerationTool(BaseTool):
             self._default_model = "custom_llm_instance"
             self._fast_model = None
             self._fast_dimensions = set()
+            self._use_volcengine = False
+            self._context_id = None
+            self._context_llm = None
+            self._context_cache_tried = True
             print("[QuestionGenTool] 🚀 使用外部注入 LLM 实例")
             return
 
-        self._default_model = os.getenv("QUESTION_GEN_MODEL", "Qwen/Qwen2.5-72B-Instruct")
-        self._balanced_model = os.getenv("QUESTION_GEN_BALANCED_MODEL", "Qwen/Qwen2.5-32B-Instruct")
-        self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "Qwen/Qwen2.5-14B-Instruct")
+        # 检测 LLM 提供商：优先火山引擎，回退 SiliconFlow
+        self._use_volcengine = bool(os.getenv("ARK_API_KEY"))
+        if self._use_volcengine:
+            _get_llm = get_volcengine_chat_openai
+            self._default_model = os.getenv("QUESTION_GEN_MODEL", "doubao-seed-2-0-lite-260215")
+            self._balanced_model = os.getenv("QUESTION_GEN_BALANCED_MODEL", "doubao-seed-2-0-lite-260215")
+            self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "doubao-seed-2-0-mini-260215")
+            print("[QuestionGenTool] 🌋 使用火山引擎 (Doubao)")
+        else:
+            _get_llm = get_siliconflow_chat_openai
+            self._default_model = os.getenv("QUESTION_GEN_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
+            self._balanced_model = os.getenv("QUESTION_GEN_BALANCED_MODEL", "Qwen/Qwen2.5-32B-Instruct")
+            self._fast_model = os.getenv("QUESTION_GEN_FAST_MODEL", "Qwen/Qwen2.5-14B-Instruct")
+            print("[QuestionGenTool] 🔵 使用 SiliconFlow (Qwen)")
 
         try:
             llm_temperature = float(os.getenv("QUESTION_GEN_TEMPERATURE", "0.7"))
@@ -100,10 +126,10 @@ class QuestionGenerationTool(BaseTool):
         except ValueError:
             llm_timeout = 20.0
 
-        fast_dims_raw = os.getenv("QUESTION_GEN_FAST_DIMENSIONS", "闲聊")
+        fast_dims_raw = os.getenv("QUESTION_GEN_FAST_DIMENSIONS", "")
         self._fast_dimensions = {d.strip() for d in fast_dims_raw.split(",") if d.strip()}
 
-        self._llm = get_siliconflow_chat_openai(
+        self._llm = _get_llm(
             model=self._default_model,
             temperature=llm_temperature,
             max_tokens=llm_max_tokens,
@@ -111,7 +137,7 @@ class QuestionGenerationTool(BaseTool):
         )
 
         if self._balanced_model and self._balanced_model != self._default_model:
-            self._balanced_llm = get_siliconflow_chat_openai(
+            self._balanced_llm = _get_llm(
                 model=self._balanced_model,
                 temperature=max(0.5, llm_temperature - 0.05),
                 max_tokens=llm_max_tokens,
@@ -121,7 +147,7 @@ class QuestionGenerationTool(BaseTool):
             self._balanced_llm = None
 
         if self._fast_model and self._fast_model != self._default_model:
-            self._fast_llm = get_siliconflow_chat_openai(
+            self._fast_llm = _get_llm(
                 model=self._fast_model,
                 temperature=max(0.3, llm_temperature - 0.1),
                 max_tokens=llm_max_tokens,
@@ -138,6 +164,14 @@ class QuestionGenerationTool(BaseTool):
             f"快速模型={fast_model_info} | 快速维度={sorted(self._fast_dimensions)}"
         )
 
+        # 🔥 Context Cache：延迟初始化，在 _run 首次调用时用实际 system_prompt 创建缓存
+        self._context_id = None
+        self._context_llm = None
+        self._context_cache_tried = False
+        self._llm_temperature = llm_temperature
+        self._llm_max_tokens = llm_max_tokens
+        self._llm_timeout = llm_timeout
+
     def _should_use_balanced_model(self, task_instruction: Optional[str], last_user_msg: Optional[str]) -> bool:
         text = f"{task_instruction or ''} {last_user_msg or ''}"
         quality_keywords = [
@@ -145,6 +179,19 @@ class QuestionGenerationTool(BaseTool):
             "不想回答", "不想说", "不做", "别问", "拒绝", "不愿意",
         ]
         return any(k in text for k in quality_keywords)
+
+    def _should_use_fast_structured_model(self, dimension_name: str, task_instruction: Optional[str]) -> bool:
+        """
+        对时间/地点这类结构化、答案空间小的问题，优先走更快模型。
+        这类题不需要 32B/72B 的开放式生成能力。
+        """
+        normalized_dimension = (dimension_name or "").strip()
+        text = f"{normalized_dimension} {task_instruction or ''}"
+        structured_keywords = [
+            "定向力", "星期", "周几", "几月", "几号", "日期", "季节",
+            "城市", "什么区", "哪个区", "地点", "住哪", "住在哪里", "地址",
+        ]
+        return any(k in text for k in structured_keywords)
 
     def _select_llm(
         self,
@@ -154,6 +201,10 @@ class QuestionGenerationTool(BaseTool):
     ) -> tuple[ChatOpenAI, str]:
         """按轮次复杂度选择模型：高风险语义用平衡模型，普通闲聊用快速模型。"""
         normalized_dimension = (dimension_name or "").strip()
+        # 🔥 不再将定向力等结构化维度路由到14B快速模型
+        # 14B无法遵守反公式化语气指令，统一走72B主模型
+        # if self._fast_llm and self._should_use_fast_structured_model(dimension_name, task_instruction):
+        #     return self._fast_llm, self._fast_model or self._default_model
         if self._balanced_llm and self._should_use_balanced_model(task_instruction, last_user_msg):
             return self._balanced_llm, self._balanced_model or self._default_model
         if self._fast_llm and normalized_dimension in self._fast_dimensions:
@@ -168,24 +219,48 @@ class QuestionGenerationTool(BaseTool):
         return any(m in t for m in markers) or ("？" in t) or ("?" in t)
 
     def _keep_single_question(self, text: str) -> str:
-        """压缩为单个主问句，减少“连环双问”带来的冗余。"""
+        """压缩为单个主问句，优先保留更具体、信息量更高的那一句。"""
         import re
+
         q = (text or "").strip()
         if not q:
             return q
         q = q.replace("?", "？")
-        segments = [seg.strip("，。；;!！~～ ") for seg in re.split(r"[？]+", q) if seg.strip("，。；;!！~～ ")]
-        if not segments:
-            return ""
-        chosen = segments[0]
-        if len(segments) > 1 and not self._looks_like_question(chosen):
-            for seg in segments[1:]:
-                if self._looks_like_question(seg):
-                    chosen = seg
-                    break
-        if self._looks_like_question(chosen):
-            return f"{chosen}？"
-        return chosen
+
+        # 切成若干问句片段，并记录每句前面的前缀
+        matches = list(re.finditer(r'([^？]*？)', q))
+        if not matches:
+            return q
+
+        question_parts = [m.group(1).strip("，。；;!！~～ ") for m in matches]
+        if len(question_parts) == 1:
+            chosen = question_parts[0]
+            return f"{chosen}？" if self._looks_like_question(chosen) else chosen
+
+        def _score_question(seg: str) -> tuple[int, int]:
+            text_seg = (seg or "").strip()
+            info_markers = ("什么", "怎么", "哪里", "哪个", "多少", "几月", "几号", "星期", "城市", "区", "安排", "做什么", "有没有")
+            weak_markers = ("是吧", "对不对", "好吗", "是不是", "还行吗", "顺心吗")
+            score = 0
+            if any(m in text_seg for m in info_markers):
+                score += 3
+            if any(m in text_seg for m in weak_markers):
+                score -= 2
+            if self._looks_like_question(text_seg):
+                score += 1
+            score += min(len(text_seg) // 8, 2)
+            return score, len(text_seg)
+
+        best_idx = max(range(len(question_parts)), key=lambda i: _score_question(question_parts[i]))
+        chosen = question_parts[best_idx].rstrip("？")
+
+        # 尝试保留真正的回应部分，丢掉前面那些“弱问句”
+        prefix = q[:matches[best_idx].start()].strip("，。；;!！~～ ")
+        if prefix and "？" in prefix:
+            prefix = prefix.split("？", 1)[0].strip("，。；;!！~～ ")
+        if prefix and not self._looks_like_question(prefix):
+            return f"{prefix}，{chosen}？"
+        return f"{chosen}？"
 
     def _normalize_for_similarity(self, text: str) -> str:
         import re
@@ -441,22 +516,75 @@ class QuestionGenerationTool(BaseTool):
         _start_time = time.time()
         
         system_prompt = (
-            "你是对方的晚辈或老邻居，在轻松聊天。\n"
-            "你不是AI、不是医生、不是采访者。\n\n"
-            "严格只输出 JSON：{\"utterance\":\"...\"}\n\n"
+            "你是对方的晚辈或老邻居，在轻松唠嗑。\n"
+            "你不是AI、不是医生、不是采访者、不是主持人。\n\n"
+            '严格只输出 JSON：{"utterance":"..."}\n\n'
             "规则：\n"
-            "1) utterance 必须先回应对方刚说的话，再自然过渡到提问。\n"
+            "1) utterance 必须先详细回应对方刚说的具体内容，再自然过渡到提问。\n"
             "2) utterance 里必须包含且仅包含一个问题（只问一件事）。\n"
             "3) 必须执行任务指令；若有 must_include，问题里必须包含。\n"
             "4) 若有 bridge_hint，问题必须直接命中该目标话题。\n"
             "5) 对认知减退老人，一次只问一件事，优先日常具体问题。\n"
-            "6) 避免空泛问法，如“最近有什么新鲜事分享一下”。\n"
-            "7) 可用轻量选择式问法（如“您更喜欢A还是B”），但不要连环追问。\n"
+            "5) 要热情，要像人说话。\n"
+            "6) 避免空泛问法，如「最近有什么新鲜事分享一下」。\n"
+            "7) 可用轻量选择式问法（如「您更喜欢A还是B」），但不要连环追问。\n"
             "8) 不要输出任何解释、前后缀或 Markdown。\n"
-            "9) 回应部分必须和对方原话直接相关，禁止“我听着挺好”这类空泛附和。\n"
-            "10) 若对方表达拒绝/低落，先接纳情绪，再轻柔转话题，禁止硬夸赞。"
+            "9) 回应部分必须引用对方原话中的具体内容（如地名、活动、数字），禁止「我听着挺好」「嘴的」「好的」这类不含信息量的空泛附和。\n"
+            '11) 不要重复询问对方在"最近聊天记录"中已经明确回答过的信息。只追问真正缺失的项。\n'
+            '12) 【关键】若【任务指令】要求问某个信息，但「对方刚才说」里已经直接包含了这个信息（如任务要问星期几，对方刚才说了「星期六」），则禁止再问同样的事，改为顺水推舟接下去聊或自然换话题。\n'
+            "10) 若对方表达拒绝/低落，先接纳情绪，再轻柔转话题，禁止硬夸赞。\n\n"
+            "【严禁编造、复述和泄露答案·最高优先级】：\n"
+            "❌ 绝对禁止用「我」开头复述对方做过的事（对方说「我出门走了走」→禁止说「我今天出门走了走，挺好」）\n"
+            "❌ 绝对禁止说话不像人说的，比如，路洋爷爷知道今天是星期吗？正常人没有这样说话的\n"
+            "❌ 绝对禁止编造个人经历（如「我也住5楼」「我之前去过那里」「我也喜欢」「我今天也…」）\n"
+            "❌ 你没有住址、没有经历、没有偏好，不要假装和对方有共同点\n"
+            "❌ 禁止完整复述对方原话（不要照搬整句，只提炼关键词简短回应即可）\n"
+            "❌ 禁止主动说出对方还没提到的事实信息（年份、月份、日期、星期、季节等）——这是认知评估，你主动说出=泄露答案\n"
+              "【语气必须像真人唠嗑，禁止以下公式化写法】：\n"
+            "❌ 禁止用「那」做过渡词（如「那您住在哪个城市呢」）\n"
+            "❌ 禁止书面语/文艺腔（如「春天的气息确实越来越浓了」）\n"
+            "❌ 禁止「[称呼]+[文艺回应]+那+[直接提问]」的模板句式\n"
+            "❌ 禁止连续使用同一个过渡词（尤其是「对了」），每次必须换不同的衔接方式\n"
+            "✅ 用口语化连接，轮流使用不同词：「话说」「诶」「说起来」「哎您说」「说到这个」「嗨对了」「哎我想起来了」「您猜怎么着」\n"
+            "✅ 用大白话（「可不是嘛」「是啊」「就是」「嗯呐」）\n\n"
+            "好的示例：\n"
+            "- 对方说「春天了」→ 可不是嘛，外头暖和多了。话说您家这边是哪个城市来着？\n"
+            "- 对方说「刚吃完饭」→ 吃的啥呀？诶今天星期几来着，我都记混了。\n"
+            "- 对方说「没啥事」→ 嗯，歇着也好。哎您说，您住这边多久了，哪个区呀？\n"
+            "- 对方说「我住5楼」→ 5楼啊，视野挺好的。说起来，您这边是哪个医院呀？\n"
+            "- 对方说「辽宁省大连市甘井子区」→ 大连那边海风挺舒服的。哎我想起来了，您现在待的这地方是什么地方呀，几楼？\n"
+            "- 对方说「我喜欢散步」→ 散步好啊，走走身体舒坦。您一般喜欢去哪儿散步呀？\n"
+            "坏的示例（禁止）：\n"
+            "- 路洋爷爷，春天的气息确实越来越浓了。那您现在住在哪个城市呢？ ← 太书面+公式化\n"
+            "- 嗯呐，甘井子区啊，我之前在甘井子区待过一阵子。 ← 编造经历\n"
+            "- 您在家住5楼啊，我也是住5楼，跟您一个楼层呢。 ← 编造共同点\n"
+            "- 您在大连的呃辽宁省大连市甘井子区啊。 ← 鹦鹉学舌+复述噪音词\n"
+            "- 我今天出门走了走，挺好。 ← 用「我」复述对方的活动，禁止！\n"
+            "- 嗯呐，散步看书刷新闻，日子过得挺踏实。 ← 把对方原话照搬回去，禁止！\n"
+            "- 嗯呐，2026年3月22日，周日，春天了。 ← 复述日期+泄露答案（春天），严重禁止！"
         )
-        
+
+        # 🔥 延迟初始化 Context Cache（首次调用时创建）
+        if self._use_volcengine and not self._context_cache_tried:
+            self._context_cache_tried = True
+            try:
+                ctx_id = create_volcengine_context_cache(
+                    model=self._default_model,
+                    system_prompt=system_prompt,
+                )
+                if ctx_id:
+                    self._context_id = ctx_id
+                    self._context_llm = get_volcengine_context_chat_openai(
+                        context_id=ctx_id,
+                        model=self._default_model,
+                        temperature=self._llm_temperature,
+                        max_tokens=self._llm_max_tokens,
+                        timeout=self._llm_timeout,
+                    )
+                    print(f"[QuestionGenTool] 🔥 Context Cache 已启用: {ctx_id}")
+            except Exception as e:
+                print(f"[QuestionGenTool] ⚠️ Context Cache 初始化异常: {e}")
+
         user_prompt_parts = []
         
         # 聊天话题引导（内部使用，不暴露给用户）
@@ -517,11 +645,11 @@ class QuestionGenerationTool(BaseTool):
         if patient_name:
             # 根据性别确定称呼后缀
             if patient_gender == '男':
-                suffix = '爷爷' if (patient_age and patient_age >= 60) else '叔叔'
+                suffix = '爷爷' if (patient_age and int(patient_age) >= 60) else '叔叔'
             else:
-                suffix = '奶奶' if (patient_age and patient_age >= 60) else '阿姨'
+                suffix = '奶奶' if (patient_age and int(patient_age) >= 60) else '阿姨'
             full_name = f"{patient_name}{suffix}"
-            user_prompt_parts.append(f"\n对方叫{patient_name}，【必须】统一称呼'{full_name}'，不要只叫'{patient_name}'或其他变体")
+            user_prompt_parts.append(f"\n🚨【称呼规则·最高优先级】对方叫{patient_name}，全程只能用'{full_name}'称呼，严禁出现'{patient_name}'单独使用、'{patient_name}叔'等任何其他变体。每次提到对方时必须用完整的'{full_name}'。")
         
         # 如果是定向力维度，注入当前真实时间、地点和天气信息
         if "定向" in dimension_name or "orientation" in dimension_description.lower():
@@ -566,8 +694,8 @@ class QuestionGenerationTool(BaseTool):
                         if content and len(content) > 5:
                             prev_ai_responses.append(content[:60])
                 
-                # 最近2轮对话，控制 token
-                recent = history_list[-4:]
+                # 最近4轮对话，让LLM掌握对话脉络
+                recent = history_list[-8:]
                 context_desc = "\n【最近聊天记录】\n"
                 for msg in recent:
                     role_zh = "你" if msg.get("role") == "assistant" else "对方"
@@ -612,16 +740,45 @@ class QuestionGenerationTool(BaseTool):
             if active_model != self._default_model:
                 print(f"[QuestionGenTool] ⚡ 非主模型路径: {active_model} (维度={dimension_name})")
 
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
+            # 🔥 Context Cache 路径：主模型 + 有缓存 → 跳过 system message
+            use_context = (
+                self._context_llm is not None
+                and self._context_id is not None
+                and active_llm is self._llm  # 仅主模型走缓存，平衡/快速模型走普通路径
+            )
+
+            if use_context:
+                messages = [{"role": "user", "content": user_prompt}]
+                _invoke_llm = self._context_llm
+                print(f"[QuestionGenTool] ⚡ Context Cache 命中 ({self._context_id[:20]}...)")
+            else:
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+                _invoke_llm = active_llm
 
             try:
-                response = active_llm.invoke(messages)
+                response = _invoke_llm.invoke(messages)
             except Exception as invoke_error:
-                # 主模型失败时回退到快速模型，避免一次失败拖慢整轮对话
-                if active_llm is self._llm and self._fast_llm is not None:
+                if use_context:
+                    # Context Cache 调用失败，降级为普通模式重试
+                    print(f"[QuestionGenTool] ⚠️ Context Cache 调用失败，降级普通模式: {invoke_error}")
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                    try:
+                        response = active_llm.invoke(messages)
+                    except Exception as fallback_error:
+                        if self._fast_llm is not None:
+                            print(f"[QuestionGenTool] ⚠️ 主模型也失败，回退快速模型: {fallback_error}")
+                            active_model = self._fast_model or self._default_model
+                            response = self._fast_llm.invoke(messages)
+                        else:
+                            raise
+                elif active_llm is self._llm and self._fast_llm is not None:
+                    # 主模型失败时回退到快速模型，避免一次失败拖慢整轮对话
                     print(f"[QuestionGenTool] ⚠️ 主模型调用失败，回退快速模型: {invoke_error}")
                     active_model = self._fast_model or self._default_model
                     response = self._fast_llm.invoke(messages)
@@ -656,14 +813,12 @@ class QuestionGenerationTool(BaseTool):
                 utterance = (parsed.get("utterance") or parsed.get("reply") or "").strip()
 
                 if utterance:
-                    utterance = self._rewrite_utterance_if_needed(utterance, topic_hint, dimension_name)
                     question = utterance
                     print(f"[QuestionGenTool] ✅ JSON解析成功: utterance='{utterance[:40]}...'")
                 else:
                     # 兼容旧协议：ack + q
                     raw_ack = parsed.get("ack", "").strip()
                     q = parsed.get("q", "").strip()
-                    q = self._keep_single_question(q)
                     if self._is_too_open_ended(q):
                         q = self._rewrite_open_question(q, topic_hint, dimension_name)
                     ack = self._sanitize_ack(raw_ack, q)
@@ -725,7 +880,6 @@ class QuestionGenerationTool(BaseTool):
                             q = json_module.loads(f"\"{q}\"")
                         except Exception:
                             q = q.replace('\\"', '"')
-                        q = self._keep_single_question(q)
                         topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
                         if self._is_too_open_ended(q):
                             q = self._rewrite_open_question(q, topic_hint, dimension_name)
@@ -750,19 +904,6 @@ class QuestionGenerationTool(BaseTool):
             # 最终清洗
             question = re.sub(r"^(医生|护士|我)[:：]\s*", "", question).strip()
 
-            # 结构兜底：若缺少回应且有用户原话，触发一次 LLM 二次改写
-            if last_user_msg and question and not self._has_ack_before_question(question):
-                topic_hint = self._extract_topic_hint(task_instruction, bridge_hint)
-                repaired = self._enforce_ack_with_llm(
-                    utterance=question,
-                    last_user_msg=last_user_msg,
-                    topic_hint=topic_hint,
-                    active_llm=active_llm,
-                )
-                if repaired != question:
-                    print("[QuestionGenTool] 🔧 已补齐回应段（LLM二次改写）")
-                question = repaired
-            
             # 清理问题末尾
             if question and not question.endswith(("？", "?", "。", ".", "！", "!", "~", "～")):
                 question += "？"
@@ -803,8 +944,6 @@ class QuestionGenerationTool(BaseTool):
         question = re.sub(r"，+", "，", question)  # 多个逗号合并为一个
         question = re.sub(r"。，", "，", question)  # 。，变为，
         question = re.sub(r"，(?=[？?。!！~～])", "", question)  # 逗号后面直接跟标点时删除逗号
-        # 只保留一个主问句，避免“两个连续问句”听感过于密集
-        question = self._keep_single_question(question) if ("？" in question or "?" in question) else question
         
         # 清理问题末尾
         if question and not question.endswith(("？", "?", "。", ".", "！", "!", "~", "～")):
@@ -852,9 +991,9 @@ class QuestionGenerationTool(BaseTool):
         # 生成称呼
         if patient_name:
             if patient_gender == '男':
-                suffix = '爷爷' if (patient_age and patient_age >= 60) else '叔叔'
+                suffix = '爷爷' if (patient_age and int(patient_age) >= 60) else '叔叔'
             else:
-                suffix = '奶奶' if (patient_age and patient_age >= 60) else '阿姨'
+                suffix = '奶奶' if (patient_age and int(patient_age) >= 60) else '阿姨'
             greeting = f"{patient_name}{suffix}"
         else:
             greeting = ""

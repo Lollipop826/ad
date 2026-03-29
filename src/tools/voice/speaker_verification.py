@@ -46,7 +46,34 @@ class SpeakerVerifier:
         from speechbrain.lobes.features import Fbank
         from speechbrain.processing.features import InputNormalization
         
-        model_dir = "/root/autodl-tmp/models/spkrec-ecapa-voxceleb"
+        # 尝试多个可能的模型路径
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models', 'spkrec-ecapa-voxceleb'),
+            "/root/autodl-tmp/models/spkrec-ecapa-voxceleb",
+        ]
+        
+        model_dir = None
+        for path in possible_paths:
+            path = os.path.normpath(path)
+            if os.path.exists(path) and os.path.exists(os.path.join(path, "embedding_model.ckpt")):
+                model_dir = path
+                break
+        
+        if model_dir is None:
+            # 如果本地没有模型，使用 SpeechBrain 的预训练模型接口
+            print("[SpeakerVerifier] 本地模型未找到，使用 SpeechBrain 预训练模型...")
+            from speechbrain.inference.speaker import EncoderClassifier
+            self.classifier = EncoderClassifier.from_hparams(
+                source="speechbrain/spkrec-ecapa-voxceleb",
+                savedir=os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models', 'spkrec-ecapa-voxceleb'),
+                run_opts={"device": str(self.device)}
+            )
+            self.use_pretrained = True
+            SPEAKER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+            return
+        
+        self.use_pretrained = False
+        print(f"[SpeakerVerifier] 使用本地模型: {model_dir}")
         
         # 创建特征提取器
         self.compute_features = Fbank(n_mels=80)

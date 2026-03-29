@@ -17,7 +17,7 @@ from langchain.tools import BaseTool
 from langchain_openai import ChatOpenAI
 
 from src.utils.location_service import get_realtime_context
-from src.llm.http_client_pool import get_siliconflow_chat_openai
+from src.llm.http_client_pool import get_siliconflow_chat_openai, get_volcengine_chat_openai
 
 
 class AnswerEvaluationToolArgs(BaseModel):
@@ -49,15 +49,15 @@ class AnswerEvaluationTool(BaseTool):
             "desc": "询问今天星期几",
             "eval_hint": "判断患者说的星期几是否与当前实际日期一致。允许口语化表达如'周五'='星期五'"
         },
-        "orientation_time_date_month_season": {
-            "name": "日期/季节", 
-            "desc": "询问几月几号、什么季节",
-            "eval_hint": "判断日期、月份、季节是否正确。日期误差1天内可接受，季节必须正确"
+        "orientation_time_year_season_month_date": {
+            "name": "年份/季节/月份/日期", 
+            "desc": "询问今年是哪一年、什么季节、几月、几号",
+            "eval_hint": "分别评估4个子项：(1)年份是否正确 (2)季节是否正确 (3)月份是否正确 (4)几号是否正确（误差1天可接受）。每个子项独立计分(对=1分,错=0分)。回答中未涉及的项算0分。季节偏好、感受描述不算答对。"
         },
-        "orientation_place_city_district": {
-            "name": "地点", 
-            "desc": "询问所在城市、区域",
-            "eval_hint": "判断城市、区域是否与参考信息一致。省略'市/区'字样可接受"
+        "orientation_place_full": {
+            "name": "地点定向(省/市/区/医院/楼层)", 
+            "desc": "询问所在省份、城市、区县、什么场所/医院、第几层楼",
+            "eval_hint": "分别评估5个子项：(1)省份 (2)城市 (3)区/县 (4)什么场所/医院 (5)第几层楼。每个子项独立计分(对=1分,错=0分)。回答中未涉及的项算0分。省略'省/市/区'字样可接受。"
         },
         # 记忆任务
         "registration_3words": {
@@ -98,9 +98,14 @@ class AnswerEvaluationTool(BaseTool):
             "eval_hint": "判断患者是否读出了文字内容或做出了闭眼动作。执行动作即为正确"
         },
         "language_3step_action": {
-            "name": "三步指令", 
-            "desc": "执行三步动作指令",
-            "eval_hint": "判断是否按顺序完成三步动作。每完成一步算部分正确，全完成为完全正确"
+            "name": "动作指令", 
+            "desc": "在胸口摆出5的手势",
+            "eval_hint": "判断患者是否在胸口摆出了5的手势。口头确认做好了即为正确"
+        },
+        "language_writing_sentence": {
+            "name": "书写", 
+            "desc": "写一个完整的句子",
+            "eval_hint": "判断患者是否写出了一个完整的句子。句子需包含主语和谓语，有实际含义。只写单个词语或无意义字符算错误。"
         },
         # 构图
         "copy_pentagons": {
@@ -128,13 +133,22 @@ class AnswerEvaluationTool(BaseTool):
             from src.llm.model_pool import get_pooled_llm
             self._llm = get_pooled_llm(pool_key='eval_long')
         else:
-            print("[AnswerEvalTool] 🌐 使用 API")
-            self._llm = get_siliconflow_chat_openai(
-                model=os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen2.5-14B-Instruct"),
-                temperature=0.1,
-                timeout=20,
-                max_retries=1,
-            )
+            if os.getenv("ARK_API_KEY"):
+                print("[AnswerEvalTool] � 使用火山引擎 (Doubao)")
+                self._llm = get_volcengine_chat_openai(
+                    model=os.getenv("ANSWER_EVAL_MODEL", "doubao-seed-2-0-lite-260215"),
+                    temperature=0.05,
+                    timeout=20,
+                    max_retries=1,
+                )
+            else:
+                print("[AnswerEvalTool] 🔵 使用 SiliconFlow")
+                self._llm = get_siliconflow_chat_openai(
+                    model=os.getenv("ANSWER_EVAL_MODEL", "Qwen/Qwen2.5-32B-Instruct"),
+                    temperature=0.05,
+                    timeout=20,
+                    max_retries=1,
+                )
     
     def _extract_response(self, response) -> str:
         """从 LLM 响应中提取文本"""
@@ -214,30 +228,47 @@ class AnswerEvaluationTool(BaseTool):
         time_info = context['time']
         location = context['location']
         
-        # 🔥 简化的系统提示（只要核心字段，避免截断）
-        system_prompt = """评估患者回答，只输出JSON：{"is_correct":true/false,"quality":"excellent/good/fair/poor"}
-- is_correct: 回答是否正确
-- quality: excellent=完美, good=基本对, fair=部分对, poor=错误"""
+        # 🔥 v2: 详细的系统提示，减少错判
+        system_prompt = """你是一位资深神经内科医生，正在对老年患者进行 MMSE（简易精神状态检查）认知筛查。
+你的任务是**严格评估**患者的回答是否正确。
+
+## 核心原则
+1. **只评估回答的事实正确性**，不要被患者的语气、态度、礼貌用语影响判断
+2. **口语化表达是正常的**：老人说"周五"等于"星期五"，说"93块"等于"93"，说"那个表"等于"手表"
+3. **关注实质内容**：忽略语气词（嗯、啊、哦）、礼貌语（好的、知道了）、重复词
+4. **宁可判对不要误判错**：如果回答包含正确信息但表述不标准，应判为正确
+5. **闲聊/寒暄不是答题**：如果患者只是在聊天而没有回答问题，quality 为 fair
+
+## 输出格式
+只输出JSON，不要输出任何其他内容：
+{"is_correct": true/false, "quality": "excellent/good/fair/poor"}
+
+- excellent: 完全正确，清晰准确
+- good: 基本正确，有小瑕疵但核心信息对
+- fair: 部分正确，或回答不完整
+- poor: 完全错误，或答非所问"""
 
         # 构建用户提示
-        user_prompt = f"任务: {task_info['name']}（{task_info['desc']}）\n问题: {question}\n回答: {answer}"
+        user_prompt = f"## 评估任务\n任务: {task_info['name']}（{task_info['desc']}）\n医生的问题: {question}\n患者的回答: {answer}"
         
         # 添加评估提示
         eval_hint = task_info.get('eval_hint', '')
         if eval_hint:
-            user_prompt += f"\n\n【评判标准】{eval_hint}"
+            user_prompt += f"\n\n## 评判标准\n{eval_hint}"
         
         if expected_answer:
-            user_prompt += f"\n期望答案: {expected_answer}"
+            user_prompt += f"\n\n## 正确答案\n{expected_answer}"
         
         # 定向力任务需要当前时间/地点信息
         if task_id.startswith("orientation"):
-            user_prompt += f"\n\n【参考信息】"
+            user_prompt += f"\n\n## 当前真实信息（用于对比）"
             user_prompt += f"\n当前时间: {time_info['year']}年{time_info['month']}月{time_info['day']}日 星期{time_info['weekday']} {time_info['season']}"
             user_prompt += f"\n当前地点: {location.get('province', '')} {location.get('city', '')} {location.get('district', '')}"
         
         if patient_profile:
-            user_prompt += f"\n患者: {patient_profile.get('age', '?')}岁, 受教育{patient_profile.get('education_years', '?')}年"
+            user_prompt += f"\n\n## 患者信息\n{patient_profile.get('age', '?')}岁, 受教育{patient_profile.get('education_years', '?')}年"
+        
+        user_prompt += "\n\n请只输出JSON结果："
         
         try:
             response = self._llm.invoke([

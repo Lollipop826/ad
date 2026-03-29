@@ -15,6 +15,7 @@ import time
 import re
 from difflib import SequenceMatcher
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 
 from src.tools.agent_tools import (
     QueryTool,
@@ -31,6 +32,7 @@ from src.tools.agent_tools import (
     StandardQuestionTool,
 )
 from src.domain.dimensions import MMSE_DIMENSIONS
+from src.utils.tool_logger import set_current_tool_log_session
 
 
 class ADScreeningAgentFunctionCalling:
@@ -76,6 +78,10 @@ class ADScreeningAgentFunctionCalling:
     ]
 
     BUFFER_TASKS: set = {"persona_collect_1", "persona_collect_2", "buffer_chat", "buffer_consent", "buffer_answer_question"}
+
+    # 🔬 需要视觉/动作检测的任务（暂无视觉大模型时设为不提问，直接跳过）
+    # 读字闭眼 language_reading_close_eyes 保留：可凭用户回答评估是否照做
+    VISUAL_ACTION_TASKS: set = {"language_3step_action"}
 
     """
     阿尔茨海默病初筛Agent - Function Calling 版本
@@ -136,8 +142,15 @@ class ADScreeningAgentFunctionCalling:
             self.llm = get_pooled_llm(pool_key='small_classify')  # 使用快速小模型
             print("[AgentFC] ✅ 已配置打断检测 LLM (small_classify)")
         else:
-            # API模式，可以使用工具的LLM
-            self.llm = None
+            # API模式：使用轻量 API LLM 做打断检测
+            from src.llm.http_client_pool import get_chat_openai
+            self.llm = get_chat_openai(
+                temperature=0.1,
+                max_tokens=8,
+                timeout=5,
+                max_retries=1,
+            )
+            print("[AgentFC] ✅ 已配置打断检测 LLM (API 模式)")
         
         print("[AgentFC] ✅ Agent 初始化完成\n")
     
@@ -469,27 +482,49 @@ class ADScreeningAgentFunctionCalling:
                 if last_task_is_buffer:
                     print(f"[AgentFC] 💬 上轮是缓冲任务({last_task_id})，跳过评分但检测抵抗")
                     
-                    # 🔥 性能优化：buffer 路径也并行执行（ResistanceTool + TaskSelection + Retrieval 预取）
-                    # 原来是串行：ResistanceTool(~4s) → Phase2 TaskSelection(~2s) = 6s
-                    # 现在并行：max(ResistanceTool, TaskSelection, Retrieval) ≈ 2s
-                    print("[AgentFC] ⚡ buffer路径: 并行执行抵抗检测(API)+任务选择(API)+知识预取...")
+                    # 🔥 v1.2: 快速抵抗预判 — 短/积极回答直接跳过 ResistanceTool (省 2-4s)
+                    _positive_kw = ['好', '是', '对', '嗯', '行', '可以', '不错', '舒畅', '开心', '高兴', '挺好']
+                    _negative_kw = ['不', '烦', '累', '别', '走', '算了', '不想', '讨厌', '没意思', '无聊']
+                    _answer_stripped = user_answer.strip()
+                    _is_clearly_positive = (
+                        len(_answer_stripped) <= 20
+                        and any(kw in _answer_stripped for kw in _positive_kw)
+                        and not any(kw in _answer_stripped for kw in _negative_kw)
+                    )
                     
-                    with ThreadPoolExecutor(max_workers=3) as executor:
-                        # 1. 抵抗检测
-                        future_resist = executor.submit(self._call_resistance_detection, doctor_question, user_answer)
+                    if _is_clearly_positive:
+                        # ⚡ 极速路径：明显积极回答，跳过抵抗检测 API
+                        print(f"[AgentFC] ⚡ buffer极速路径: 积极回答'{_answer_stripped[:15]}'，跳过抵抗检测")
+                        resistance_result = {'is_resistant': False, 'confidence': 1.0, 'category': 'none'}
                         
-                        # 2. 🔥 提前启动任务选择（不用等 ResistanceTool 完成）
-                        future_task_select = None
-                        if not self._pending_consent_task_id:
-                            future_task_select = executor.submit(self._select_next_task)
-                        
-                        # 3. 🔥 预取知识检索（Phase 3 可能需要）
-                        _prefetch_query = self._call_query_generation(dimension_name, chat_history)
-                        future_retrieval = executor.submit(self._call_knowledge_retrieval, _prefetch_query)
-                        print(f"[AgentFC] ⚡ buffer路径: 预取知识检索已启动 (维度: {dimension_name})")
-                        
-                        # 获取抵抗检测结果
-                        resistance_result = future_resist.result()
+                        # 只做任务选择 + 知识预取（并行）
+                        with ThreadPoolExecutor(max_workers=2) as executor:
+                            future_task_select = None
+                            if not self._pending_consent_task_id:
+                                future_task_select = executor.submit(self._select_next_task)
+                            _prefetch_query = self._call_query_generation(dimension_name, chat_history)
+                            future_retrieval = executor.submit(self._call_knowledge_retrieval, _prefetch_query)
+                            print(f"[AgentFC] ⚡ buffer极速路径: 任务选择+知识预取并行执行")
+                    else:
+                        # 正常路径：并行执行抵抗检测 + 任务选择 + 知识预取
+                        print("[AgentFC] ⚡ buffer路径: 并行执行抵抗检测(API)+任务选择+知识预取...")
+                    
+                        with ThreadPoolExecutor(max_workers=3) as executor:
+                            # 1. 抵抗检测
+                            future_resist = executor.submit(self._call_resistance_detection, doctor_question, user_answer)
+                            
+                            # 2. 提前启动任务选择
+                            future_task_select = None
+                            if not self._pending_consent_task_id:
+                                future_task_select = executor.submit(self._select_next_task)
+                            
+                            # 3. 预取知识检索
+                            _prefetch_query = self._call_query_generation(dimension_name, chat_history)
+                            future_retrieval = executor.submit(self._call_knowledge_retrieval, _prefetch_query)
+                            print(f"[AgentFC] ⚡ buffer路径: 预取知识检索已启动 (维度: {dimension_name})")
+                            
+                            # 获取抵抗检测结果
+                            resistance_result = future_resist.result()
                     
                     # 🔥 处理请求重复：直接重复上一个问题
                     if resistance_result.get('category') == 'repeat_request':
@@ -580,15 +615,27 @@ class ADScreeningAgentFunctionCalling:
                     # 获取期望答案（用于精准评估）
                     expected_answer = self._get_expected_answer_for_task(last_task_id, patient_profile)
                     
-                    # 🔥 优化：先做抵抗检测（~40ms），如果有抵抗就跳过回答评估（~4秒）
+                    # 🔥 v1优化：三级快速路径 - 越简单的回答走越快的路径
                     simple_answers = ["好", "好的", "嗯", "对", "是", "是的", "知道", "明白", "行", "可以"]
-                    is_simple_answer = user_answer.strip() in simple_answers or len(user_answer.strip()) <= 3
+                    is_simple_confirm = user_answer.strip() in simple_answers
+                    is_short_answer = len(user_answer.strip()) <= 3
                     
-                    if is_simple_answer:
-                        # 简单回答：只做回答评估，跳过抵抗检测
+                    # 🔥 v1: 规则化快速评估（完全跳过 LLM，省 1-4 秒）
+                    rule_eval_result = self._try_rule_based_evaluation(
+                        last_task_id, user_answer, expected_answer
+                    )
+                    
+                    if rule_eval_result is not None:
+                        # ⚡ 极速路径：规则可以直接判断（数字回答、关键词匹配等）
+                        print(f"[AgentFC] ⚡⚡ 极速路径: 规则评估 '{user_answer[:15]}' → {rule_eval_result.get('quality_level')}")
+                        resistance_result = {'is_resistant': False, 'confidence': 1.0, 'category': 'none'}
+                        self._prefetched_retrieval = None
+                        eval_result = rule_eval_result
+                    elif is_simple_confirm or is_short_answer:
+                        # 简单确认回答：只做回答评估，跳过抵抗检测
                         print(f"[AgentFC] ⚡ 快速路径: 简单回答'{user_answer[:10]}'，跳过抵抗检测")
                         resistance_result = {'is_resistant': False, 'confidence': 1.0, 'category': 'none'}
-                        self._prefetched_retrieval = None  # 快速路径无预取
+                        self._prefetched_retrieval = None
                         eval_result = self._call_answer_evaluation(
                             doctor_question, user_answer, last_task_id, patient_profile, expected_answer
                         )
@@ -802,16 +849,13 @@ class ADScreeningAgentFunctionCalling:
                         next_task_id = self._precomputed_next_task
                         self._precomputed_next_task = None  # 用完清空
                         
-                        # 🔥 检查话题是否新鲜（本轮 Step1 是否运行）
+                        # 🔥 v1.2: 不再刷新话题。预计算任务和话题已经是基于当前对话历史的，直接使用
+                        # 之前的问题：Phase 1 并行执行时，_current_turn_topic_set 在线程内设置，主线程可能还没看到
+                        # 导致 Phase 2 误判为"来自上轮"，又执行了一次话题选择（浪费 0.7s + 话题不一致）
                         topic_info = ""
-                        if not getattr(self, '_current_turn_topic_set', False):
-                            # 本轮没有运行 Step 1，话题可能是陈旧的
-                            # 同步运行 Step 1 获取新鲜话题
-                            print(f"[AgentFC] ⚠️ 预计算任务来自上轮，同步刷新话题...")
-                            _ = self._select_next_task()  # 这会更新 _last_bridge_hint
-                        
                         if hasattr(self, '_last_bridge_hint') and self._last_bridge_hint:
                             topic_info = f" (话题: {self._last_bridge_hint})"
+                        print(f"[AgentFC] ⚡ 使用预计算任务: {next_task_id}{topic_info}")
                         
                         # 🔥 检查 recall_3words 的时间限制
                         is_valid_precomputed = True
@@ -822,9 +866,7 @@ class ADScreeningAgentFunctionCalling:
                                 is_valid_precomputed = False
                                 next_task_id = "buffer_chat"
                         
-                        if is_valid_precomputed:
-                            print(f"[AgentFC] ⚡ 使用预计算任务: {next_task_id}{topic_info}")
-                        else:
+                        if not is_valid_precomputed:
                             print(f"[AgentFC] 🔄 回退到 buffer_chat{topic_info}")
                     else:
                         next_task_id = self._select_next_task()
@@ -892,7 +934,16 @@ class ADScreeningAgentFunctionCalling:
             if next_task_id and self._needs_consent_for_task(next_task_id):
                 # 🔥 检查任务状态，如果是进行中则无需再次同意
                 task_status = self.session_data.get('task_progress', {}).get(next_task_id, {}).get('status')
-                is_granted = (next_task_id == self._consent_granted_task_id) or (task_status == 'in_progress')
+                # 多轮任务：只在首次进入时征求同意；进入后（轮数>0 且未完成）视为进行中
+                turns_so_far = 0
+                if hasattr(self, "_task_turns"):
+                    turns_so_far = self._task_turns.get(next_task_id, 0)
+                is_multi_turn_in_progress = (turns_so_far > 0 and next_task_id not in self._task_done)
+                is_granted = (
+                    (next_task_id == self._consent_granted_task_id)
+                    or (task_status == 'in_progress')
+                    or is_multi_turn_in_progress
+                )
                 
                 if not is_granted:
                     self._pending_consent_task_id = next_task_id
@@ -1217,6 +1268,23 @@ class ADScreeningAgentFunctionCalling:
             
         print(f"[Classification] ℹ️ 规则未命中，归为闲聊")
         return "buffer_chat"
+
+    def _map_bridge_hint_to_task(self, bridge_hint: Optional[str], candidates: List[str]) -> Optional[str]:
+        """
+        将 LLM 选出的过渡话题直接映射到具体任务，避免已经命中评估点后又回到 buffer_chat。
+        """
+        if not bridge_hint or not candidates:
+            return None
+
+        topic_text = bridge_hint.split("→")[-1].strip() if "→" in bridge_hint else bridge_hint.strip()
+        if not topic_text:
+            return None
+
+        matched_task = self.classify_question_sync(topic_text, candidates)
+        if matched_task != "buffer_chat":
+            print(f"[TaskPool] 🎯 话题直达任务: '{topic_text}' -> {matched_task}")
+            return matched_task
+        return None
     
     def start_classification_async(self, question: str):
         """
@@ -1280,7 +1348,8 @@ class ADScreeningAgentFunctionCalling:
     
     def _call_resistance_detection(self, question: str, answer: str) -> Dict:
         """调用抵抗检测工具"""
-        result_json = self.resistance_tool._run(question=question, answer=answer)
+        with self._tool_log_scope():
+            result_json = self.resistance_tool._run(question=question, answer=answer)
         return json.loads(result_json)
     
     def _call_comfort_response(
@@ -1296,16 +1365,17 @@ class ADScreeningAgentFunctionCalling:
             patient_profile: 患者画像
             chat_relaxed: 是否聊轻松话题（目前工具不使用此参数）
         """
-        result_json = self.comfort_tool._run(
-            resistance_category=resistance_result.get('category', 'refusal'),
-            patient_answer=patient_answer,
-            resistance_reason=resistance_result.get('rationale'),
-            patient_age=patient_profile.get('age'),
-            patient_name=patient_profile.get('name'),
-            patient_gender=patient_profile.get('gender'),
-            used_topics=self._used_chat_topics,
-            chat_history=self.session_data.get('chat_history')
-        )
+        with self._tool_log_scope():
+            result_json = self.comfort_tool._run(
+                resistance_category=resistance_result.get('category', 'refusal'),
+                patient_answer=patient_answer,
+                resistance_reason=resistance_result.get('rationale'),
+                patient_age=patient_profile.get('age'),
+                patient_name=patient_profile.get('name'),
+                patient_gender=patient_profile.get('gender'),
+                used_topics=self._used_chat_topics,
+                chat_history=self.session_data.get('chat_history')
+            )
         
         # 更新已聊话题
         try:
@@ -1340,7 +1410,8 @@ class ADScreeningAgentFunctionCalling:
         self._active_session_id = session_id
         self._last_task_id = None
         self._last_generated_question = "请开始评估"
-        self._task_done = set()
+        # 需要视觉/动作的任务暂不提问，直接视为已完成
+        self._task_done = set(self.VISUAL_ACTION_TASKS)
         self._task_attempts = {}
         self._task_best = {}
         self._task_turns = {}  # 🔥 每个任务的对话轮数计数
@@ -1371,11 +1442,15 @@ class ADScreeningAgentFunctionCalling:
         self.consecutive_failures = 0
 
     def _get_max_consecutive_buffer_chat(self) -> int:
-        """读取连续 buffer 上限，默认 2（最多连续两轮闲聊）。"""
+        """读取连续 buffer 上限，默认 1（最多连续一轮闲聊，然后立即进入评估）。
+        
+        🔥 v1.2: 从 2 降为 1。AD 患者评估中，1 轮寒暄后应立即开始具体的认知测试，
+        避免空聊浪费时间。评估中的自然过渡由 bridge_hint 保证。
+        """
         try:
-            limit = int(os.getenv("MAX_CONSECUTIVE_BUFFER_CHAT", "2"))
+            limit = int(os.getenv("MAX_CONSECUTIVE_BUFFER_CHAT", "1"))
         except ValueError:
-            limit = 2
+            limit = 1
         return max(0, limit)
 
     def _select_next_task(self) -> Optional[str]:
@@ -1399,6 +1474,8 @@ class ADScreeningAgentFunctionCalling:
         candidates = []
         
         for task_id in self.REQUIRED_TASKS:
+            if task_id in self.VISUAL_ACTION_TASKS:
+                continue  # 需视觉/动作的任务暂不提问
             if task_id in self._task_done:
                 continue
 
@@ -1649,9 +1726,13 @@ class ADScreeningAgentFunctionCalling:
 
         # 🆕 改进方案：LLM 只生成回应，代码保证任务邀请
         try:
-            from src.llm.model_pool import get_pooled_llm
             import random
-            llm = get_pooled_llm(pool_key='7b_complex')
+            if getattr(self, 'use_local', False):
+                from src.llm.model_pool import get_pooled_llm
+                llm = get_pooled_llm(pool_key='7b_complex')
+            else:
+                from src.llm.http_client_pool import get_chat_openai
+                llm = get_chat_openai(temperature=0.7, max_tokens=60, timeout=10, max_retries=1)
             
             # 任务邀请模板（代码保证 purpose 出现）
             invite_templates = [
@@ -1878,71 +1959,76 @@ class ADScreeningAgentFunctionCalling:
                 if content:
                     recent_chat += f"{role}：{content}\n"
 
-        # 🛑 保底机制：连续闲聊超过3次，强制选择任务
+        # 🛑 保底机制：连续闲聊超过N次，强制选择任务
         max_buffer_rounds = self._get_max_consecutive_buffer_chat()
         if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
             print(f"[TaskPool] ⚠️ 连续闲聊 {self._consecutive_buffer_count} 次，强制选择任务")
             
-            forced_system_message = f"""你是一个对话策略师。
-现在需要从下面的任务列表中选择一个最合适的任务。
+            # 🔥 v1.2: 本地7B + 评估导向 prompt
+            candidates_str = ", ".join([f"{tid}({task_descriptions.get(tid, tid)})" for tid in filtered_forced_candidates])
+            forced_prompt = f"""你是认知筛查策略师。从以下任务中选一个，要能从当前话题自然过渡过去。
+任务列表：{candidates_str}
 
-【候选任务】（必须选择其中一个）
-{chr(10).join([f"- {tid}: {task_descriptions.get(tid, tid)}" for tid in filtered_forced_candidates])}
-
-【输出格式】严格输出 JSON：
-{{
-    "from_topic": "当前话题",
-    "to_topic": "下一个话题",
-    "selected_task_id": "必须填一个候选任务ID",
-    "reason": "选择理由"
-}}
-
-【要求】
-- selected_task_id 必须是上面列出的候选任务之一
-- 选择与当前对话最相关、过渡最自然的任务
-"""
-            forced_user_message = f"""最近对话：
+最近对话：
 {recent_chat if recent_chat else '（刚开始聊天）'}
 
-请选择一个任务："""
+选择原则：优先选能和当前话题衔接的任务。比如聊天气→聊日期/季节，聊做了啥→聊星期几，聊在家→聊住哪里。
+严格输出JSON：{{"from_topic":"当前话题","to_topic":"过渡话题","selected_task_id":"任务ID"}}"""
             
             try:
-                from src.llm.http_client_pool import get_siliconflow_chat_openai
-                router_model = os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-                llm = get_siliconflow_chat_openai(
-                    model=router_model,
-                    temperature=0.5,
-                    timeout=15,
-                    max_retries=1,
-                )
+                _t_start = time.time()
+                if getattr(self, 'use_local', False):
+                    from src.llm.model_pool import get_pooled_llm
+                    llm = get_pooled_llm(pool_key='7b_complex')
+                else:
+                    from src.llm.http_client_pool import get_chat_openai
+                    llm = get_chat_openai(temperature=0.5, max_tokens=80, timeout=15, max_retries=1)
+
+                # 添加异常处理和重试
+                max_retries = 3 if getattr(self, 'use_local', False) else 2
+                response = None
+                for retry in range(max_retries):
+                    try:
+                        response = llm.invoke([{"role": "user", "content": forced_prompt}])
+                        break
+                    except (RuntimeError, Exception) as e:
+                        if getattr(self, 'use_local', False) and ("Already borrowed" in str(e) or "borrowed" in str(e).lower()):
+                            if retry < max_retries - 1:
+                                wait_time = 0.1 * (retry + 1)
+                                print(f"[TaskPool] ⚠️ 模型被占用，等待 {wait_time:.1f}s 后重试 ({retry+1}/{max_retries})...")
+                                time.sleep(wait_time)
+                                continue
+                        raise e
                 
-                response = llm.invoke([
-                    {"role": "system", "content": forced_system_message},
-                    {"role": "user", "content": forced_user_message}
-                ])
+                if response is None:
+                    raise RuntimeError("本地LLM调用失败，已重试3次")
                 
                 content = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+                print(f"[TaskPool] ⚡ 本地LLM任务选择耗时: {time.time()-_t_start:.2f}s")
+                
                 cleaned = re.sub(r'```json\s*|\s*```', '', content)
                 data = json.loads(cleaned)
                 
                 selected = data.get("selected_task_id")
                 from_topic, to_topic = data.get("from_topic", "").strip(), data.get("to_topic", "").strip()
 
-                if to_topic and self._is_recent_bridge_topic(to_topic, window=1):
+                # 🔁 避免在一个会话内反复使用同一过渡话题（比如总是回到“星期几”）
+                if to_topic and self._is_recent_bridge_topic(to_topic, window=3):
                     print(f"[TaskPool] 🔁 强制模式话题重复: '{to_topic}'，尝试重选...")
                     try:
-                        from_topic_retry, to_topic_retry = _retry_topic_once(
-                            llm, forced_system_message, to_topic, recent_chat
-                        )
-                        if to_topic_retry and not self._is_recent_bridge_topic(to_topic_retry, window=1):
+                        retry_prompt = f"{forced_prompt}\n注意：不要选「{to_topic}」，换一个不同话题。"
+                        retry_resp = llm.invoke([{"role": "user", "content": retry_prompt}])
+                        retry_content = retry_resp.content.strip() if hasattr(retry_resp, 'content') else str(retry_resp).strip()
+                        from_topic_retry, to_topic_retry = _parse_topic_json(retry_content)
+                        if to_topic_retry and not self._is_recent_bridge_topic(to_topic_retry, window=3):
                             from_topic, to_topic = from_topic_retry, to_topic_retry
                     except Exception as e_retry:
                         print(f"[TaskPool] ⚠️ 强制模式重选失败: {e_retry}")
                 
                 if selected in filtered_forced_candidates:
-                    self._consecutive_buffer_count = 0  # 重置计数器
+                    self._consecutive_buffer_count = 0
                     self._last_bridge_hint = f"{from_topic}→{to_topic}" if from_topic else to_topic
-                    self._current_turn_topic_set = True  # 🔥 标记本轮 Step1 已运行
+                    self._current_turn_topic_set = True
                     self._remember_bridge_topic(to_topic)
                     self._last_forced_task_id = selected
                     print(f"[TaskPool] ✅ 强制选择任务: {selected}")
@@ -1959,61 +2045,72 @@ class ADScreeningAgentFunctionCalling:
         
         # ========== 正常模式：两步分离 ==========
         
-        # 📍 第一步：LLM 完全自由选择话题（不给它看任务列表！）
-        step1_system = """你是一个对话策略师，正在陪老人聊天。
-根据对话上下文，选择一个最自然、最相关的话题作为接下来的聊天方向。
+        # 📍 第一步：LLM 选择话题（导向评估维度）
+        # 🔥 v1.2: prompt 引导话题走向具体的认知评估方向
+        step1_prompt = f"""你是认知筛查对话策略师。要通过自然聊天评估老人的认知能力。
+严格输出JSON：{{"from_topic":"当前话题","to_topic":"下一个话题"}}
 
-【输出格式】严格输出 JSON：
-{
-    "from_topic": "当前话题（2-4字）",
-    "to_topic": "下一个话题（2-4字）",
-    "reason": "选择理由"
-}
+【核心目标】选的话题要能自然引出以下评估点之一：
+- 时间感：今天星期几、几月几号、什么季节
+- 地点感：住在哪个城市、什么区
+- 兴趣爱好：平时喜欢做什么
+- 生活细节：今天吃了什么、做了什么
 
-【核心策略】
-1. **顺藤摸瓜**：必须基于用户刚才说的话（Content）顺势延伸。
-2. **逻辑桥梁**：如果必须切换话题，必须在 reason 里想好过渡逻辑。
-3. **禁止生硬**：不要无厘头地跳到完全无关的话题（如从"吃饭"突然跳到"算术"），除非你能找到非常好的借口（如"算算饭钱"）。
+【策略】顺着用户说的话，过渡到上面的评估点。不要聊模糊的感受（如"心情""感觉"），要聊具体的事。
+示例：用户说"心情不错" → {{"from_topic":"心情","to_topic":"今天安排"}}（从心情好→问今天干什么具体事）
+示例：用户说"在家看电视" → {{"from_topic":"看电视","to_topic":"星期几"}}（从看电视→今天周几有啥好节目）
 
-【示例】
-- 用户："最近老忘事。"
-- 输出：{"from_topic": "忘事", "to_topic": "记忆", "reason": "用户提到忘事，顺势聊记忆力最自然"}
-
-- 用户："刚吃完饺子。"
-- 输出：{"from_topic": "吃饭", "to_topic": "算术", "reason": "从买菜算账过渡到算术"}
-"""
-        step1_user = f"""最近对话：
+最近对话：
 {recent_chat if recent_chat else '（刚开始聊天）'}
 
-请选择下一个话题："""
+输出JSON："""
 
         try:
-            print(f"[TaskPool] 🧠 第一步：自由选择话题...")
-            
-            from src.llm.http_client_pool import get_siliconflow_chat_openai
-            router_model = os.getenv("TASK_ROUTER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-            llm = get_siliconflow_chat_openai(
-                model=router_model,
-                temperature=0.7,
-                timeout=15,
-                max_retries=1,
-            )
-            
-            response1 = llm.invoke([
-                {"role": "system", "content": step1_system},
-                {"role": "user", "content": step1_user}
-            ])
-            
+            _use_local = getattr(self, 'use_local', False)
+            _mode_tag = "本地LLM" if _use_local else "API"
+            print(f"[TaskPool] 🧠 第一步：自由选择话题 ({_mode_tag})...")
+            _t_start = time.time()
+
+            if _use_local:
+                from src.llm.model_pool import get_pooled_llm
+                llm = get_pooled_llm(pool_key='7b_complex')
+            else:
+                from src.llm.http_client_pool import get_chat_openai
+                llm = get_chat_openai(temperature=0.5, max_tokens=80, timeout=15, max_retries=1)
+
+            # 添加异常处理和重试
+            max_retries = 3 if _use_local else 2
+            response1 = None
+            for retry in range(max_retries):
+                try:
+                    response1 = llm.invoke([{"role": "user", "content": step1_prompt}])
+                    break
+                except (RuntimeError, Exception) as e:
+                    if _use_local and ("Already borrowed" in str(e) or "borrowed" in str(e).lower()):
+                        if retry < max_retries - 1:
+                            wait_time = 0.1 * (retry + 1)
+                            print(f"[TaskPool] ⚠️ 模型被占用，等待 {wait_time:.1f}s 后重试 ({retry+1}/{max_retries})...")
+                            time.sleep(wait_time)
+                            continue
+                    raise e
+
+            if response1 is None:
+                raise RuntimeError("话题选择LLM调用失败")
+
             content1 = response1.content.strip() if hasattr(response1, 'content') else str(response1).strip()
+            print(f"[TaskPool] ⚡ {_mode_tag}话题选择耗时: {time.time()-_t_start:.2f}s")
+
             from_topic, to_topic = _parse_topic_json(content1)
 
-            if to_topic and self._is_recent_bridge_topic(to_topic, window=1):
+            # 🔁 话题生命周期控制：避免整段评估过程中总在同一个话题上打转
+            if to_topic and self._is_recent_bridge_topic(to_topic, window=3):
                 print(f"[TaskPool] 🔁 话题重复: '{to_topic}'，尝试重选...")
                 try:
-                    from_topic_retry, to_topic_retry = _retry_topic_once(
-                        llm, step1_system, to_topic, recent_chat
-                    )
-                    if to_topic_retry and not self._is_recent_bridge_topic(to_topic_retry, window=1):
+                    retry_prompt = f"{step1_prompt}\n注意：不要选「{to_topic}」，换一个不同话题。"
+                    retry_resp = llm.invoke([{"role": "user", "content": retry_prompt}])
+                    retry_content = retry_resp.content.strip() if hasattr(retry_resp, 'content') else str(retry_resp).strip()
+                    from_topic_retry, to_topic_retry = _parse_topic_json(retry_content)
+                    if to_topic_retry and not self._is_recent_bridge_topic(to_topic_retry, window=3):
                         from_topic, to_topic = from_topic_retry, to_topic_retry
                 except Exception as e_retry:
                     print(f"[TaskPool] ⚠️ 话题重选失败: {e_retry}")
@@ -2022,11 +2119,16 @@ class ADScreeningAgentFunctionCalling:
             bridge_hint = f"{from_topic}→{to_topic}" if from_topic and to_topic else to_topic
             self._last_bridge_hint = bridge_hint
             self._remember_bridge_topic(to_topic)
-            self._current_turn_topic_set = True  # 🔥 标记本轮 Step1 已运行
+            self._current_turn_topic_set = True
+
+            # 🔥 话题已经命中评估点时，直接落到具体任务，不再绕回 buffer_chat
+            direct_task = self._map_bridge_hint_to_task(bridge_hint, non_buffer_candidates)
+            if direct_task:
+                self._consecutive_buffer_count = 0
+                self._last_forced_task_id = direct_task
+                return direct_task
             
-            # 🔥 Step 2 已移除（移至后台并行执行）
-            # 直接返回 buffer_chat，让 QuestionGen 根据 bridge_hint 生成自然对话
-            # 后台线程会并行检查这个 bridge_hint 是否属于某个 Task
+            # buffer 上限兜底
             if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
                 selected = random.choice(filtered_forced_candidates or non_buffer_candidates)
                 self._consecutive_buffer_count = 0
@@ -2039,7 +2141,6 @@ class ADScreeningAgentFunctionCalling:
             
         except Exception as e:
             print(f"[TaskPool] ⚠️ 第一步选择失败: {e}")
-            # 兜底：达到上限时优先返回非 buffer 任务，避免连续闲聊过多
             if self._consecutive_buffer_count >= max_buffer_rounds and non_buffer_candidates:
                 selected = random.choice(filtered_forced_candidates or non_buffer_candidates)
                 self._consecutive_buffer_count = 0
@@ -2047,6 +2148,161 @@ class ADScreeningAgentFunctionCalling:
                 print(f"[TaskPool] 🎲 失败兜底切任务: {selected}")
                 return selected
             return "buffer_chat"
+
+    def _try_rule_based_evaluation(
+        self, task_id: str, user_answer: str, expected_answer: Optional[str]
+    ) -> Optional[Dict]:
+        """
+        🔥 v1: 规则化快速评估 — 完全跳过 LLM，省 1-4 秒
+        
+        能处理的场景：
+        1. 数字回答（计算题：93, 86, 79...）
+        2. 关键词匹配（命名：手表、铅笔）
+        3. 星期/日期匹配
+        4. 记忆词匹配（recall）
+        
+        Returns:
+            评估结果字典 (与 _call_answer_evaluation 格式一致), 或 None 表示无法规则判断
+        """
+        if not task_id or task_id in self.BUFFER_TASKS:
+            return None
+        
+        answer = user_answer.strip()
+        if not answer:
+            return None
+        
+        # --- 1. 计算题 (attention_calc_life_math) ---
+        if task_id == "attention_calc_life_math":
+            # 提取用户回答中的数字
+            import re
+            numbers = re.findall(r'\d+', answer)
+            if numbers:
+                # 计算题场景下通常最后一个数字才是回答，例如“100减7是93”
+                user_num = int(numbers[-1])
+                # 🔥 优先使用“本轮题面”的期望答案，避免生成问题时提前更新状态导致错判
+                expected_num = None
+                if expected_answer is not None:
+                    exp_nums = re.findall(r'\d+', str(expected_answer))
+                    if exp_nums:
+                        expected_num = int(exp_nums[0])
+                if expected_num is None:
+                    if hasattr(self, "_calculation_current_value") and self._calculation_current_value is not None:
+                        expected_num = self._calculation_current_value - self._calculation_step
+                    else:
+                        return None
+                if user_num == expected_num:
+                    return {
+                        'is_correct': True, 'quality_level': 'excellent',
+                        'cognitive_performance': '正常', 'is_complete': True,
+                        'evaluation_detail': f'规则评估: {user_num} == {expected_num} ✓',
+                        'need_followup': False, 'confidence': 1.0
+                    }
+                elif abs(user_num - expected_num) <= 2:
+                    return {
+                        'is_correct': False, 'quality_level': 'fair',
+                        'cognitive_performance': '轻度异常', 'is_complete': True,
+                        'evaluation_detail': f'规则评估: {user_num} ≈ {expected_num} (差{abs(user_num-expected_num)})',
+                        'need_followup': False, 'confidence': 0.9
+                    }
+                else:
+                    return {
+                        'is_correct': False, 'quality_level': 'poor',
+                        'cognitive_performance': '中度异常', 'is_complete': True,
+                        'evaluation_detail': f'规则评估: {user_num} ≠ {expected_num}',
+                        'need_followup': False, 'confidence': 0.9
+                    }
+        
+        # --- 2. 命名题 (language_naming_watch / pencil) ---
+        if task_id == "language_naming_watch":
+            if any(kw in answer for kw in ['手表', '表', '钟表', '腕表']):
+                return {
+                    'is_correct': True, 'quality_level': 'excellent',
+                    'cognitive_performance': '正常', 'is_complete': True,
+                    'evaluation_detail': '规则评估: 正确命名手表',
+                    'need_followup': False, 'confidence': 1.0
+                }
+            elif len(answer) <= 10:  # 短回答但不含关键词 = 错误
+                return {
+                    'is_correct': False, 'quality_level': 'poor',
+                    'cognitive_performance': '异常', 'is_complete': True,
+                    'evaluation_detail': f'规则评估: 未命名手表 ({answer})',
+                    'need_followup': False, 'confidence': 0.8
+                }
+        
+        if task_id == "language_naming_pencil":
+            if any(kw in answer for kw in ['铅笔', '笔', '钢笔', '圆珠笔']):
+                return {
+                    'is_correct': True, 'quality_level': 'excellent',
+                    'cognitive_performance': '正常', 'is_complete': True,
+                    'evaluation_detail': '规则评估: 正确命名铅笔',
+                    'need_followup': False, 'confidence': 1.0
+                }
+            elif len(answer) <= 10:
+                return {
+                    'is_correct': False, 'quality_level': 'poor',
+                    'cognitive_performance': '异常', 'is_complete': True,
+                    'evaluation_detail': f'规则评估: 未命名铅笔 ({answer})',
+                    'need_followup': False, 'confidence': 0.8
+                }
+        
+        # --- 3. 星期 (orientation_time_weekday) ---
+        if task_id == "orientation_time_weekday" and expected_answer:
+            weekday_map = {
+                '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7,
+                '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7,
+            }
+            # 从 expected_answer 提取期望星期
+            expected_day = None
+            for k, v in weekday_map.items():
+                if k in (expected_answer or ''):
+                    expected_day = v
+                    break
+            # 从用户回答提取
+            user_day = None
+            for k, v in weekday_map.items():
+                if k in answer:
+                    user_day = v
+                    break
+            
+            if expected_day and user_day:
+                if user_day == expected_day:
+                    return {
+                        'is_correct': True, 'quality_level': 'excellent',
+                        'cognitive_performance': '正常', 'is_complete': True,
+                        'evaluation_detail': f'规则评估: 星期正确',
+                        'need_followup': False, 'confidence': 1.0
+                    }
+                else:
+                    return {
+                        'is_correct': False, 'quality_level': 'poor',
+                        'cognitive_performance': '异常', 'is_complete': True,
+                        'evaluation_detail': f'规则评估: 星期不正确 (答{user_day}, 期望{expected_day})',
+                        'need_followup': False, 'confidence': 0.9
+                    }
+        
+        # --- 4. 记忆词 (recall_3words) ---
+        if task_id == "recall_3words":
+            memory_words = self.session_data.get('memory_words')
+            if memory_words and isinstance(memory_words, list):
+                correct_count = sum(1 for w in memory_words if w in answer)
+                if correct_count == len(memory_words):
+                    quality = 'excellent'
+                elif correct_count >= 2:
+                    quality = 'good'
+                elif correct_count >= 1:
+                    quality = 'fair'
+                else:
+                    quality = 'poor'
+                return {
+                    'is_correct': correct_count > 0, 'quality_level': quality,
+                    'cognitive_performance': '正常' if correct_count >= 2 else '轻度异常' if correct_count == 1 else '异常',
+                    'is_complete': True,
+                    'evaluation_detail': f'规则评估: 记住{correct_count}/{len(memory_words)}个词',
+                    'need_followup': False, 'confidence': 0.9
+                }
+        
+        # 无法规则判断
+        return None
 
     def _get_expected_answer_for_task(self, task_id: str, patient_profile: Dict) -> Optional[str]:
         """获取任务的期望答案（用于精准评估）"""
@@ -2408,7 +2664,8 @@ class ADScreeningAgentFunctionCalling:
     def _call_knowledge_retrieval(self, query_result: Dict) -> Dict:
         """调用知识检索工具"""
         query = query_result.get('query', f"{self.current_dimension.get('name')} 认知评估")
-        result_json = self.retrieval_tool._run(query=query, top_k=3)
+        with self._tool_log_scope():
+            result_json = self.retrieval_tool._run(query=query, top_k=3)
         return json.loads(result_json)
     
     def _call_question_generation(
@@ -2436,24 +2693,33 @@ class ADScreeningAgentFunctionCalling:
             recent_history = conversation_history[-6:]  # 最近3轮（6条消息）
             history_info = recent_history  # 直接传 List[Dict]，question_tool 支持结构化历史
 
-        result_json = self.question_tool._run(
-            dimension_name=dimension_name,
-            dimension_description="",
-            knowledge_context=knowledge_context,
-            patient_age=patient_age,
-            patient_education=patient_education,
-            patient_name=patient_name,
-            patient_gender=patient_gender,
-            conversation_history=history_info,
-            patient_emotion=patient_emotion,
-            task_instruction=task_instruction,
-            persona_hooks=persona_hooks,
-            must_include=must_include,
-            avoid_questions=self._asked_questions,
-            bridge_hint=self._last_bridge_hint,  # 🔥 传入过渡提示
-        )
+        with self._tool_log_scope():
+            result_json = self.question_tool._run(
+                dimension_name=dimension_name,
+                dimension_description="",
+                knowledge_context=knowledge_context,
+                patient_age=patient_age,
+                patient_education=patient_education,
+                patient_name=patient_name,
+                patient_gender=patient_gender,
+                conversation_history=history_info,
+                patient_emotion=patient_emotion,
+                task_instruction=task_instruction,
+                persona_hooks=persona_hooks,
+                must_include=must_include,
+                avoid_questions=self._asked_questions,
+                bridge_hint=self._last_bridge_hint,  # 🔥 传入过渡提示
+            )
         result = json.loads(result_json)
         return result.get('question', '请继续')
+
+    @contextmanager
+    def _tool_log_scope(self):
+        set_current_tool_log_session(self.session_id)
+        try:
+            yield
+        finally:
+            set_current_tool_log_session(None)
 
     def _extract_persona_hooks(self, patient_profile: Dict, chat_history: List) -> List[str]:
         hooks = []
@@ -2623,9 +2889,13 @@ class ADScreeningAgentFunctionCalling:
         patient_name = patient_profile.get('name', '')
         
         try:
-            from src.llm.model_pool import get_pooled_llm
-            llm = get_pooled_llm(pool_key='7b_complex')
-            
+            if getattr(self, 'use_local', False):
+                from src.llm.model_pool import get_pooled_llm
+                llm = get_pooled_llm(pool_key='7b_complex')
+            else:
+                from src.llm.http_client_pool import get_chat_openai
+                llm = get_chat_openai(temperature=0.7, max_tokens=80, timeout=10, max_retries=1)
+
             # 获取最近几轮对话作为上下文
             recent_history = chat_history[-6:] if chat_history else []
             history_text = "\n".join([
@@ -2790,6 +3060,9 @@ class ADScreeningAgentFunctionCalling:
                             timeout=10,
                             max_retries=1,
                         )
+                        # 🔁 将已使用过的过渡话题显式告诉 LLM，降低再次选中的概率
+                        recent_topics = [t for t in self._used_bridge_topics[-6:] if t]
+                        recent_topics_text = "、".join(recent_topics) if recent_topics else "（暂无）"
 
                         prompt_topic = f"""当前对话正过渡到话题：「{topic_text}」。
 请判断这个话题是否直接对应以下待完成任务之一：
@@ -2797,7 +3070,11 @@ class ADScreeningAgentFunctionCalling:
 
 如果对应，输出任务ID。
 否则输出 None。
-只输出结果，不要解释。"""
+只输出结果，不要解释。
+
+【话题使用记录】本次会话里，之前已经用过这些话题做过渡：{recent_topics_text}
+如果当前话题和这些话题高度相似（比如都是围绕“星期几”“日期”反复提问），
+而且之前已经通过这些话题成功完成了相关任务，请**优先输出 None**，避免来回重复同一个话题。"""
                         res = await llm.ainvoke([{"role": "user", "content": prompt_topic}])
                         res_content = res.content.strip()
 
