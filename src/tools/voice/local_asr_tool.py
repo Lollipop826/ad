@@ -3,7 +3,10 @@
 使用OpenAI Whisper进行本地语音识别，速度快且离线运行
 """
 
-import whisper
+try:
+    import whisper
+except ImportError:
+    whisper = None
 import tempfile
 import os
 import time

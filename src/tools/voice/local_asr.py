@@ -13,8 +13,12 @@ import sounddevice as sd
 import soundfile as sf
 from typing import Optional, Callable, Generator
 import tempfile
-import torch
-import whisper
+try:
+    import torch
+    import whisper
+except ImportError:
+    torch = None
+    whisper = None
 from datetime import datetime
 
 class LocalASR:

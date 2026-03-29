@@ -11,7 +11,10 @@ from pathlib import Path
 import soundfile as sf
 import hashlib
 import time
-import edge_tts
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
 
 
 class VoiceTTS:

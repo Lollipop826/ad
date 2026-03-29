@@ -3,9 +3,15 @@ Streamlit本地ASR组件 - 简单直接版本
 使用Whisper进行本地语音识别
 """
 
-import streamlit as st
-import whisper
-import sounddevice as sd
+try:
+    import streamlit as st
+    import whisper
+    import sounddevice as sd
+except ImportError:
+    st = None
+    whisper = None
+    sounddevice = None
+    sd = None
 import soundfile as sf
 import tempfile
 import numpy as np

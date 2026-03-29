@@ -11,9 +11,14 @@ import numpy as np
 from pathlib import Path
 import hashlib
 import time
-import paddle
-import yaml
-from yacs.config import CfgNode
+try:
+    import paddle
+    import yaml
+    from yacs.config import CfgNode
+except ImportError:
+    paddle = None
+    yaml = None
+    CfgNode = None
 
 class CosyVoiceTTS:
     """PaddleSpeech 语音合成（保持类名兼容性）"""

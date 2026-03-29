@@ -3,12 +3,18 @@
 提供HTTP接口供前端调用Whisper进行语音识别
 """
 
-import whisper
 import tempfile
 import os
 import time
 import base64
-from flask import Flask, request, jsonify
+try:
+    import whisper
+    from flask import Flask, request, jsonify
+except ImportError:
+    whisper = None
+    Flask = None
+    request = None
+    jsonify = None
 import threading
 import queue
 import json
