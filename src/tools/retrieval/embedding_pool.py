@@ -4,7 +4,10 @@ Embedding 模型池 - 单例模式，避免重复加载
 import os
 import time
 from typing import Optional
-from langchain_community.embeddings import HuggingFaceEmbeddings
+try:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+except ImportError:
+    HuggingFaceEmbeddings = None
 
 
 class EmbeddingPool:

@@ -7,10 +7,14 @@
 import numpy as np
 import os
 import json
-import torch
-import torchaudio
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
+try:
+    import torch
+    import torchaudio
+except ImportError:
+    torch = None
+    torchaudio = None
 
 # 声纹数据保存目录
 SPEAKER_DATA_DIR = Path("data/speakers")

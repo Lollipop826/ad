@@ -3,8 +3,12 @@ from __future__ import annotations
 import re
 from typing import List
 
-import torch
-from sentence_transformers import CrossEncoder
+try:
+    import torch
+    from sentence_transformers import CrossEncoder
+except ImportError:
+    torch = None
+    CrossEncoder = None
 
 
 DEFAULT_MODEL = "BAAI/bge-reranker-base"

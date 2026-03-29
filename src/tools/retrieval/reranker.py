@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from typing import List, Tuple, Dict, Any
 
-import torch
-from sentence_transformers import CrossEncoder
+try:
+    import torch
+    from sentence_transformers import CrossEncoder
+except ImportError:
+    torch = None
+    CrossEncoder = None
 
 
 DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-base"
