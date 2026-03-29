@@ -2,8 +2,13 @@
 本地 Qwen2.5-7B 模型服务
 使用 transformers 加载，提供 LangChain 兼容接口
 """
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+try:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+except ImportError:
+    torch = None
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
 from langchain_core.language_models.llms import LLM
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
 from typing import Optional, List, Any

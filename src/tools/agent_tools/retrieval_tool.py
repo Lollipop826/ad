@@ -17,7 +17,10 @@ from src.tools.retrieval.sentence_filter import SentenceFilter, split_sentences
 from src.tools.retrieval.rag_fusion import create_rag_fusion_retriever, RAGFusion
 from src.tools.retrieval.reranker import CrossEncoderReranker
 from .retrieval_cache import RetrievalCache
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 
 
 class KnowledgeRetrievalToolArgs(BaseModel):

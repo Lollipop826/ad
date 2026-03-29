@@ -17,7 +17,10 @@ import numpy as np
 from pathlib import Path
 import hashlib
 import time
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 from typing import Optional, Generator, AsyncGenerator
 
 # 添加 ZipVoice 到路径
